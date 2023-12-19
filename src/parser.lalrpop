@@ -1,0 +1,38 @@
+use crate::ast::{File, FnDef, Expr};
+use std::str::FromStr;
+use std::collections::HashMap;
+
+grammar;
+
+pub File: File = {
+    <def:FnDef> <mut file:File> => { 
+        let name = def.name.clone();
+        file.defs.push(def); 
+        file.def_ids.insert(name, file.defs.len() - 1);
+        file 
+    },
+    => File { defs: vec![], def_ids: HashMap::new() },
+};
+
+pub FnDef: FnDef = 
+    "function" <name:Ident> "()" <body:Expr> "end" => FnDef { name, body };
+
+pub Expr: Expr = {
+    <l:Factor> "+" <r:Factor> => Expr::Plus(Box::new(l), Box::new(r)),
+    Factor,
+};
+
+pub Factor: Expr = {
+    Term,
+}
+
+pub Term: Expr = {
+    <Literal> => Expr::Literal(<>),
+}
+
+pub Literal: i32 = <r"[0-9]+"> => i32::from_str(<>).unwrap();
+
+pub Ident: String = {
+    <r"[a-zA-Z][a-zA-Z0-9]*"> => <>.to_string(),
+    <r"[0-9]+[a-zA-Z][a-zA-Z0-9]*"> => <>.to_string(),
+}
