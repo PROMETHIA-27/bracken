@@ -1,3 +1,6 @@
 function main()
-    27 + 3
+    while 1
+        break
+    end
+    return(27)
 end

@@ -1,4 +1,4 @@
-use crate::ast::{File, FnDef, Expr};
+use crate::ast::{File, FnDef, Expr, Stmt, Stmts};
 use std::str::FromStr;
 use std::collections::HashMap;
 
@@ -12,27 +12,55 @@ pub File: File = {
         file 
     },
     => File { defs: vec![], def_ids: HashMap::new() },
-};
+}
 
 pub FnDef: FnDef = 
-    "function" <name:Ident> "()" <body:Expr> "end" => FnDef { name, body };
+    "function" <name:Ident> "()" <body:Stmts> "end" => FnDef { name, body };
+
+pub Stmts: Stmts = {
+    <mut stmts:Stmts> <stmt:Stmt> => {
+        stmts.0.push(stmt);
+        stmts
+    },
+    => Stmts(vec![]),
+}
+
+pub Stmt: Stmt = {
+    <Expr> => Stmt::Expr(<>),
+}
 
 pub Expr: Expr = {
-    <l:Factor> "+" <r:Factor> => Expr::Plus(Box::new(l), Box::new(r)),
-    Factor,
-};
-
-pub Factor: Expr = {
+    <l:Expr> "+" <r:Term> => Expr::Plus(Box::new(l), Box::new(r)),
     Term,
+    While,
+    Break,
+    Return,
 }
 
 pub Term: Expr = {
+    <l:Term> "*" <r:Factor> => Expr::Times(Box::new(l), Box::new(r)),
+    Factor,
+}
+
+pub Factor: Expr = {
     <Literal> => Expr::Literal(<>),
+}
+
+pub While: Expr = 
+    "while" <pred:Expr> <body:Stmts> "end" => Expr::While { pred: Box::new(pred), body };
+
+pub Break: Expr = {
+    "break" => Expr::Break(None),
+}
+
+pub Return: Expr = {
+    "return" "(" <value:Expr> ")" => Expr::Return(Some(Box::new(value))),
+    "return" "(" ")" => Expr::Return(None),
 }
 
 pub Literal: i32 = <r"[0-9]+"> => i32::from_str(<>).unwrap();
 
 pub Ident: String = {
-    <r"[a-zA-Z][a-zA-Z0-9]*"> => <>.to_string(),
-    <r"[0-9]+[a-zA-Z][a-zA-Z0-9]*"> => <>.to_string(),
+    <r"[a-zA-Z][_a-zA-Z0-9]*"> => <>.to_string(),
+    <r"[0-9]+[a-zA-Z][_a-zA-Z0-9]*"> => <>.to_string(),
 }

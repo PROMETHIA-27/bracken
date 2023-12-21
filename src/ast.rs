@@ -31,7 +31,7 @@ impl File {
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub struct FnDef {
     pub name: String,
-    pub body: Expr,
+    pub body: Stmts,
 }
 
 #[cfg_attr(feature = "fern", comemo::track)]
@@ -40,13 +40,25 @@ impl FnDef {
         &self.name
     }
 
-    pub fn body(&self) -> &Expr {
+    pub fn body(&self) -> &Stmts {
         &self.body
     }
+}
+
+#[derive(Clone, Debug, Hash, PartialEq)]
+pub struct Stmts(pub Vec<Stmt>);
+
+#[derive(Clone, Debug, Hash, PartialEq)]
+pub enum Stmt {
+    Expr(Expr),
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub enum Expr {
     Literal(i32),
     Plus(Box<Expr>, Box<Expr>),
+    Times(Box<Expr>, Box<Expr>),
+    While { pred: Box<Expr>, body: Stmts },
+    Break(Option<Box<Expr>>),
+    Return(Option<Box<Expr>>),
 }
