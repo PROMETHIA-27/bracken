@@ -1,14 +1,12 @@
-use std::collections::hash_map::RandomState;
 use std::collections::{HashMap, HashSet};
 
 use bincode::{DefaultOptions, Options};
-use bracken::bytecode::{self, Func, LabelIndex, Opcode, SSAIndex};
+use bracken::bytecode::{self, Func, LabelIndex, Opcode, OpcodeIndex};
 use cm::Module;
-use cranelift_codegen::entity::EntityRef;
 use cranelift_codegen::ir::{
     types, AbiParam, Block, BlockCall, Function, InstBuilder, JumpTableData, Type, Value,
 };
-use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
+use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{self as cm, default_libcall_names};
 
@@ -47,12 +45,12 @@ fn compile_func(func: &Func, jit: &mut Jit) {
     let mut fnctx = FunctionBuilderContext::new();
     let mut b = FunctionBuilder::new(&mut cfunc, &mut fnctx);
 
-    let mut values = SSAValues::default();
-    for (i, _) in func.ops().iter().enumerate() {
-        if let Some(ty) = ssa_index_type(func.ops(), SSAIndex(i as u32)) {
-            values.add(&mut b, i, ty);
-        }
-    }
+    // let mut values = SSAValues::default();
+    // for (i, _) in func.ops().iter().enumerate() {
+    //     if let Some(ty) = ssa_index_type(func.ops(), OpcodeIndex(i as u32)) {
+    //         values.add(&mut b, i, ty);
+    //     }
+    // }
 
     let blocks = BasicBlocks::new(func.ops(), &func.labels, &func.label_pool);
     println!("{blocks:?}");
@@ -60,13 +58,19 @@ fn compile_func(func: &Func, jit: &mut Jit) {
     let blocks = blocks.0.into_iter().map(
         |BasicBlock {
              bounds: (start, end),
-         }| (start, &func.ops()[start..end]),
+             params,
+         }| (start, params, &func.ops()[start..end]),
     );
-    for (start, block) in blocks {
-        let cblock = *block_map.get(&start).unwrap();
+    let mut stack = vec![];
+    for (start, params, block) in blocks {
+        let cblock = *block_map.get(&OpcodeIndex::new(start)).unwrap();
         b.switch_to_block(cblock);
         if start == 0 {
             b.append_block_params_for_function_params(cblock);
+        }
+        for param in &params {
+            let value = b.append_block_param(cblock, *param);
+            stack.push(value);
         }
         // for arg in args {
         //     let param = b.append_block_param(cblock, ssa_index_type(func.ops(), arg).unwrap());
@@ -74,14 +78,15 @@ fn compile_func(func: &Func, jit: &mut Jit) {
         // }
         compile_block(
             block,
-            start,
             &func.labels,
             &func.label_pool,
             cblock,
             &block_map,
             &mut b,
-            &mut values,
+            // &mut values,
+            &mut stack,
         );
+        stack.clear();
         // values.clear();
     }
 
@@ -103,23 +108,23 @@ fn compile_func(func: &Func, jit: &mut Jit) {
 #[allow(clippy::too_many_arguments)]
 fn compile_block(
     ops: &[Opcode],
-    offset: usize,
-    labels: &[SSAIndex],
+    labels: &[OpcodeIndex],
     label_pool: &[LabelIndex],
     _cblock: Block,
-    block_map: &HashMap<usize, Block>,
+    block_map: &HashMap<OpcodeIndex, Block>,
     b: &mut FunctionBuilder,
-    values: &mut SSAValues,
+    stack: &mut Vec<Value>,
 ) {
-    for (i, &op) in ops.iter().enumerate() {
-        let i = SSAIndex((i + offset) as u32);
+    for &op in ops.iter() {
+        // let i = OpcodeIndex((i + offset) as u32);
         match op {
             Opcode::LiteralS1(_) => todo!(),
             Opcode::LiteralS2(_) => todo!(),
             Opcode::LiteralS4(c) => {
                 let value = b.ins().iconst(types::I32, c as i64);
+                stack.push(value);
                 // values.add(i, value);
-                values.set(i, b, value);
+                // values.set(i, b, value);
             }
             Opcode::LiteralS8(_) => todo!(),
             Opcode::LiteralU1(_) => todo!(),
@@ -128,74 +133,79 @@ fn compile_block(
             Opcode::LiteralU8(_) => todo!(),
             Opcode::LiteralF4(c) => {
                 let value = b.ins().f32const(c.0);
+                stack.push(value);
                 // values.add(i, value);
-                values.set(i, b, value);
+                // values.set(i, b, value);
             }
             Opcode::LiteralF8(_) => todo!(),
-            Opcode::Add(lhs, rhs) => {
+            Opcode::Add => {
                 // let lhs = values.get(lhs).unwrap();
                 // let rhs = values.get(rhs).unwrap();
-                let lhs = values.get(lhs, b).unwrap();
-                let rhs = values.get(rhs, b).unwrap();
+                // let lhs = values.get(lhs, b).unwrap();
+                // let rhs = values.get(rhs, b).unwrap();
+                let rhs = stack.pop().unwrap();
+                let lhs = stack.pop().unwrap();
                 let lhs_ty = b.func.dfg.value_type(lhs);
                 let rhs_ty = b.func.dfg.value_type(rhs);
                 if lhs_ty.is_int() && rhs_ty.is_int() && lhs_ty.bits() == rhs_ty.bits() {
                     let value = b.ins().iadd(lhs, rhs);
                     // values.add(i, value);
-                    values.set(i, b, value);
+                    // values.set(i, b, value);
+                    stack.push(value);
                 } else if lhs_ty.is_float() && rhs_ty.is_float() && lhs_ty.bits() == rhs_ty.bits() {
                     let value = b.ins().fadd(lhs, rhs);
                     // values.add(i, value);
-                    values.set(i, b, value);
+                    // values.set(i, b, value);
+                    stack.push(value);
                 } else {
                     panic!("attempted to add a float to an int and/or differently sized numerics")
                 }
             }
-            Opcode::Mult(lhs, rhs) => {
+            Opcode::Mult => {
                 // let lhs = values.get(lhs).unwrap();
                 // let rhs = values.get(rhs).unwrap();
-                let lhs = values.get(lhs, b).unwrap();
-                let rhs = values.get(rhs, b).unwrap();
+                // let lhs = values.get(lhs, b).unwrap();
+                // let rhs = values.get(rhs, b).unwrap();
+                let rhs = stack.pop().unwrap();
+                let lhs = stack.pop().unwrap();
                 let lhs_ty = b.func.dfg.value_type(lhs);
                 let rhs_ty = b.func.dfg.value_type(rhs);
                 if lhs_ty.is_int() && rhs_ty.is_int() && lhs_ty.bits() == rhs_ty.bits() {
                     let value = b.ins().imul(lhs, rhs);
                     // values.add(i, value);
-                    values.set(i, b, value);
+                    // values.set(i, b, value);
+                    stack.push(value);
                 } else if lhs_ty.is_float() && rhs_ty.is_float() && lhs_ty.bits() == rhs_ty.bits() {
                     let value = b.ins().fmul(lhs, rhs);
                     // values.add(i, value);
-                    values.set(i, b, value);
+                    // values.set(i, b, value);
+                    stack.push(value);
                 } else {
-                    panic!("attempted to add a float to an int and/or differently sized numerics")
+                    panic!(
+                        "attempted to multiply a float by an int and/or differently sized numerics"
+                    )
                 }
             }
-            Opcode::Return(offset) => {
-                let value = values.get(offset, b).unwrap();
+            Opcode::Return => {
+                // let value = values.get(offset, b).unwrap();
+                let value = stack.pop().unwrap();
                 b.ins().return_(&[value]);
             }
             Opcode::Jump(target) => {
-                let target_opcode = labels[target.0 as usize];
-                let target_block = block_map[&(target_opcode.0 as usize)];
+                let target_opcode = labels[target.index()];
+                let target_block = block_map[&target_opcode];
                 b.ins().jump(target_block, &[]);
             }
-            Opcode::Branch {
-                pred,
-                default,
-                targets,
-            } => {
-                let pred = values.get(pred, b).unwrap();
-                let default_opcode = labels[default.0 as usize];
-                let default = b
-                    .func
-                    .dfg
-                    .block_call(block_map[&(default_opcode.0 as usize)], &[]);
+            Opcode::Branch { default, targets } => {
+                let pred = stack.pop().unwrap();
+                let default_opcode = labels[default.index()];
+                let default = b.func.dfg.block_call(block_map[&default_opcode], &[]);
                 let jumps: Vec<BlockCall> = targets
                     .slice(label_pool)
                     .iter()
                     .map(|&label| {
-                        let target_opcode = labels[label.0 as usize];
-                        let target_block = block_map[&(target_opcode.0 as usize)];
+                        let target_opcode = labels[label.index()];
+                        let target_block = block_map[&target_opcode];
                         b.func.dfg.block_call(target_block, &[])
                     })
                     .collect();
@@ -227,78 +237,61 @@ fn compile_block(
 //     }
 // }
 
-#[derive(Default)]
-struct SSAValues {
-    values: HashMap<usize, Variable>,
-    counter: usize,
-}
+// #[derive(Default)]
+// struct SSAValues {
+//     values: HashMap<OpcodeIndex, Variable>,
+//     counter: usize,
+// }
 
-impl SSAValues {
-    pub fn get(&self, index: SSAIndex, b: &mut FunctionBuilder) -> Option<Value> {
-        self.values
-            .get(&(index.0 as usize))
-            .map(|&var| b.use_var(var))
-    }
+// impl SSAValues {
+//     pub fn get(&self, index: OpcodeIndex, b: &mut FunctionBuilder) -> Option<Value> {
+//         self.values.get(&index.index()).map(|&var| b.use_var(var))
+//     }
 
-    pub fn set(&self, index: SSAIndex, b: &mut FunctionBuilder, value: Value) {
-        if let Some(&var) = self.values.get(&(index.0 as usize)) {
-            b.def_var(var, value)
-        }
-    }
+//     pub fn set(&self, index: OpcodeIndex, b: &mut FunctionBuilder, value: Value) {
+//         if let Some(&var) = self.values.get(&index.index()) {
+//             b.def_var(var, value)
+//         }
+//     }
 
-    pub fn add(&mut self, b: &mut FunctionBuilder, index: usize, ty: Type) -> Variable {
-        let next = self.next_var();
-        assert_eq!(self.values.insert(index, next), None);
-        b.declare_var(next, ty);
-        next
-    }
+//     pub fn add(&mut self, b: &mut FunctionBuilder, index: usize, ty: Type) -> Variable {
+//         let next = self.next_var();
+//         assert_eq!(self.values.insert(index, next), None);
+//         b.declare_var(next, ty);
+//         next
+//     }
 
-    fn next_var(&mut self) -> Variable {
-        let var = Variable::new(self.counter);
-        self.counter += 1;
-        var
-    }
-}
+//     fn next_var(&mut self) -> Variable {
+//         let var = Variable::new(self.counter);
+//         self.counter += 1;
+//         var
+//     }
+// }
 
 #[derive(Clone, Debug)]
 struct BasicBlock {
     bounds: (usize, usize),
+    params: Vec<Type>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct BasicBlocks(Vec<BasicBlock>);
 
 impl BasicBlocks {
-    fn new(ops: &[Opcode], labels: &[SSAIndex], label_pool: &[LabelIndex]) -> Self {
+    fn new(ops: &[Opcode], labels: &[OpcodeIndex], label_pool: &[LabelIndex]) -> Self {
         let starts = Self::starts(ops, labels, label_pool);
         let mut blocks = BasicBlocks::default();
-        for start in starts.iter().map(|start| start.0 as usize) {
+        for start in starts.iter().map(|start| start.index()) {
             let mut cursor = start + 1;
             loop {
                 match ops.get(cursor - 1) {
                     Some(op) => match op {
-                        Opcode::Jump(_) => {
+                        Opcode::Jump(_) | Opcode::Branch { .. } | Opcode::Return => {
                             blocks.0.push(BasicBlock {
                                 bounds: (start, cursor),
+                                params: compute_block_params(&ops[start..cursor]),
                             });
                             break;
-                        }
-                        Opcode::Branch { .. } => {
-                            blocks.0.push(BasicBlock {
-                                bounds: (start, cursor),
-                            });
-                            break;
-                        }
-                        &Opcode::Return(i) => {
-                            i.check(start..cursor, &mut args);
-                            blocks.0.push(BasicBlock {
-                                bounds: (start, cursor),
-                            });
-                            break;
-                        }
-                        &Opcode::Add(l, r) | &Opcode::Mult(l, r) => {
-                            l.check(start..cursor, &mut args);
-                            r.check(start..cursor, &mut args);
                         }
                         Opcode::LiteralS1(_)
                         | Opcode::LiteralS2(_)
@@ -310,14 +303,13 @@ impl BasicBlocks {
                         | Opcode::LiteralU8(_)
                         | Opcode::LiteralF4(_)
                         | Opcode::LiteralF8(_)
+                        | Opcode::Add
+                        | Opcode::Mult
                         | Opcode::Nop => (),
                     },
                     None => {
                         // TODO: Return an error for not ending function properly
-                        blocks.0.push(BasicBlock {
-                            bounds: (start, cursor - 1),
-                        });
-                        break;
+                        panic!("ended function without diverging opcode");
                     }
                 }
                 cursor += 1;
@@ -326,12 +318,16 @@ impl BasicBlocks {
         blocks
     }
 
-    fn starts(ops: &[Opcode], labels: &[SSAIndex], label_pool: &[LabelIndex]) -> HashSet<SSAIndex> {
-        let mut starts = HashSet::from_iter([SSAIndex(0)]);
+    fn starts(
+        ops: &[Opcode],
+        labels: &[OpcodeIndex],
+        label_pool: &[LabelIndex],
+    ) -> HashSet<OpcodeIndex> {
+        let mut starts = HashSet::from_iter([OpcodeIndex::new(0)]);
         for op in ops {
             match op {
                 Opcode::Jump(target) => {
-                    let target = labels[target.0 as usize];
+                    let target = labels[target.index()];
                     starts.insert(target);
                 }
                 Opcode::LiteralS1(_)
@@ -344,16 +340,16 @@ impl BasicBlocks {
                 | Opcode::LiteralU8(_)
                 | Opcode::LiteralF4(_)
                 | Opcode::LiteralF8(_)
-                | Opcode::Add(_, _)
-                | Opcode::Mult(_, _)
-                | Opcode::Return(_)
+                | Opcode::Add
+                | Opcode::Mult
+                | Opcode::Return
                 | Opcode::Nop => continue,
                 Opcode::Branch {
                     default, targets, ..
                 } => {
-                    starts.insert(labels[default.0 as usize]);
+                    starts.insert(labels[default.index()]);
                     for &label in targets.slice(label_pool) {
-                        starts.insert(labels[label.0 as usize]);
+                        starts.insert(labels[label.index()]);
                     }
                 }
             }
@@ -361,41 +357,82 @@ impl BasicBlocks {
         starts
     }
 
-    fn block_map(&self, b: &mut FunctionBuilder) -> HashMap<usize, Block> {
+    fn block_map(&self, b: &mut FunctionBuilder) -> HashMap<OpcodeIndex, Block> {
         self.0
             .iter()
             .map(
                 |BasicBlock {
                      bounds: (start, _), ..
-                 }| (*start, b.create_block()),
+                 }| (OpcodeIndex::new(*start), b.create_block()),
             )
             .collect()
     }
 }
 
-fn ssa_index_type(ops: &[Opcode], value: SSAIndex) -> Option<Type> {
-    Some(match ops[value.0 as usize] {
-        Opcode::LiteralS1(_) | Opcode::LiteralU1(_) => types::I8,
-        Opcode::LiteralS2(_) | Opcode::LiteralU2(_) => types::I16,
-        Opcode::LiteralS4(_) | Opcode::LiteralU4(_) => types::I32,
-        Opcode::LiteralS8(_) | Opcode::LiteralU8(_) => types::I64,
-        Opcode::LiteralF4(_) => types::F32,
-        Opcode::LiteralF8(_) => types::F64,
-        Opcode::Add(l, r) | Opcode::Mult(l, r) => {
-            // TODO: Good errors
-            let l = ssa_index_type(ops, l).unwrap();
-            let r = ssa_index_type(ops, r).unwrap();
-            arithmetic_result_type(l, r)
+fn compute_block_params(block: &[Opcode]) -> Vec<Type> {
+    let mut inputs = vec![];
+    let mut stack = vec![];
+
+    for op in block {
+        match op {
+            Opcode::LiteralS1(_) | Opcode::LiteralU1(_) => stack.push(types::I8),
+            Opcode::LiteralS2(_) | Opcode::LiteralU2(_) => stack.push(types::I16),
+            Opcode::LiteralS4(_) | Opcode::LiteralU4(_) => stack.push(types::I32),
+            Opcode::LiteralS8(_) | Opcode::LiteralU8(_) => stack.push(types::I64),
+            Opcode::LiteralF4(_) => stack.push(types::F32),
+            Opcode::LiteralF8(_) => stack.push(types::F64),
+            Opcode::Add | Opcode::Mult => {
+                let rhs = stack.pop().unwrap_or_else(|| {
+                    // TODO: Remove hardcoded generic instruction types
+                    inputs.push(types::I32);
+                    types::I32
+                });
+                let lhs = stack.pop().unwrap_or_else(|| {
+                    inputs.push(rhs);
+                    rhs
+                });
+                if lhs != rhs {
+                    panic!();
+                }
+                stack.push(lhs);
+            }
+            Opcode::Return => {
+                stack.pop().unwrap_or_else(|| {
+                    inputs.push(types::I32);
+                    types::I32
+                });
+            }
+            Opcode::Jump(_) | Opcode::Branch { .. } | Opcode::Nop => (),
         }
-        Opcode::Return(_) | Opcode::Jump(_) | Opcode::Branch { .. } | Opcode::Nop => return None,
-    })
+    }
+
+    inputs.reverse();
+    inputs
 }
 
-fn arithmetic_result_type(l: Type, r: Type) -> Type {
-    if ((l.is_int() && r.is_int()) | (l.is_float() && r.is_float())) && l.bits() == r.bits() {
-        l
-    } else {
-        // TODO: Better errors
-        panic!("attempted to add a float to an int and/or differently sized numerics")
-    }
-}
+// fn ssa_index_type(ops: &[Opcode], value: OpcodeIndex) -> Option<Type> {
+//     Some(match ops[value.0 as usize] {
+//         Opcode::LiteralS1(_) | Opcode::LiteralU1(_) => types::I8,
+//         Opcode::LiteralS2(_) | Opcode::LiteralU2(_) => types::I16,
+//         Opcode::LiteralS4(_) | Opcode::LiteralU4(_) => types::I32,
+//         Opcode::LiteralS8(_) | Opcode::LiteralU8(_) => types::I64,
+//         Opcode::LiteralF4(_) => types::F32,
+//         Opcode::LiteralF8(_) => types::F64,
+//         Opcode::Add(l, r) | Opcode::Mult(l, r) => {
+//             // TODO: Good errors
+//             let l = ssa_index_type(ops, l).unwrap();
+//             let r = ssa_index_type(ops, r).unwrap();
+//             arithmetic_result_type(l, r)
+//         }
+//         Opcode::Return(_) | Opcode::Jump(_) | Opcode::Branch { .. } | Opcode::Nop => return None,
+//     })
+// }
+
+// fn arithmetic_result_type(l: Type, r: Type) -> Type {
+//     if ((l.is_int() && r.is_int()) | (l.is_float() && r.is_float())) && l.bits() == r.bits() {
+//         l
+//     } else {
+//         // TODO: Better errors
+//         panic!("attempted to add a float to an int and/or differently sized numerics")
+//     }
+// }

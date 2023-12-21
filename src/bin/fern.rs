@@ -1,6 +1,6 @@
 use bincode::{DefaultOptions, Options};
 use bracken::ast::{Expr, File, FnDef, Stmt, Stmts};
-use bracken::bytecode::{Func, LabelIndex, Module, Opcode, SSAIndex};
+use bracken::bytecode::{Func, LabelIndex, Module, Opcode, OpcodeIndex};
 use bracken::parser::FileParser;
 use bracken::{Errors, OneOf};
 use comemo::{memoize, track, Track, Tracked};
@@ -86,7 +86,7 @@ fn compile_func(def: Tracked<FnDef>) -> Func {
 fn compile_stmts(stmts: &Stmts, func: &mut Func, scopes: &mut Vec<Scope>) {
     for stmt in &stmts.0 {
         match stmt {
-            Stmt::Expr(expr) => _ = compile_expr(expr, func, scopes),
+            Stmt::Expr(expr) => compile_expr(expr, func, scopes),
         }
     }
 }
@@ -95,48 +95,48 @@ struct Scope {
     end: LabelIndex,
 }
 
-fn compile_expr(expr: &Expr, func: &mut Func, scopes: &mut Vec<Scope>) -> SSAIndex {
+fn compile_expr(expr: &Expr, func: &mut Func, scopes: &mut Vec<Scope>) {
     match expr {
-        &Expr::Literal(constant) => func.push_op(Opcode::LiteralS4(constant)),
+        &Expr::Literal(constant) => {
+            func.push_op(Opcode::LiteralS4(constant));
+        }
         Expr::Plus(lhs, rhs) => {
-            let lhs = compile_expr(lhs, func, scopes);
-            let rhs = compile_expr(rhs, func, scopes);
-            func.push_op(Opcode::Add(lhs, rhs))
+            compile_expr(lhs, func, scopes);
+            compile_expr(rhs, func, scopes);
+            func.push_op(Opcode::Add);
         }
         Expr::Times(lhs, rhs) => {
-            let lhs = compile_expr(lhs, func, scopes);
-            let rhs = compile_expr(rhs, func, scopes);
-            func.push_op(Opcode::Mult(lhs, rhs))
+            compile_expr(lhs, func, scopes);
+            compile_expr(rhs, func, scopes);
+            func.push_op(Opcode::Mult);
         }
         Expr::While { pred, body } => {
             let after_loop = func.add_label();
-            let pred = compile_expr(pred, func, scopes);
+            compile_expr(pred, func, scopes);
             let fallthrough = func.add_label();
             let targets = func.push_label_slice(&[fallthrough]);
             func.push_op(Opcode::Branch {
-                pred,
                 default: after_loop,
                 targets,
             });
-            func.set_label(fallthrough, SSAIndex(func.ops().len() as u32));
+            func.set_label(fallthrough, OpcodeIndex::new(func.ops().len()));
             scopes.push(Scope { end: after_loop });
             compile_stmts(body, func, scopes);
             scopes.pop();
-            func.set_label(after_loop, SSAIndex(func.ops().len() as u32));
-            SSAIndex::UNSET
+            func.set_label(after_loop, OpcodeIndex::new(func.ops().len()));
         }
         Expr::Break(val) => {
             // TODO: Non-empty breaks
             _ = val;
             // TODO: Good error on break without scope
             let label = scopes.last().unwrap().end;
-            func.push_op(Opcode::Jump(label))
+            func.push_op(Opcode::Jump(label));
         }
         Expr::Return(val) => {
             // TODO: Empty returns
             let val = val.as_ref().unwrap();
-            let val = compile_expr(val, func, scopes);
-            func.push_op(Opcode::Return(val))
+            compile_expr(val, func, scopes);
+            func.push_op(Opcode::Return);
         }
     }
 }
