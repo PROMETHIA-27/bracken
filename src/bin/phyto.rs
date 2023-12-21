@@ -47,11 +47,12 @@ fn compile_func(func: &Func, jit: &mut Jit) {
     let mut fnctx = FunctionBuilderContext::new();
     let mut b = FunctionBuilder::new(&mut cfunc, &mut fnctx);
 
-    // for (i, _) in func.ops().iter().enumerate() {
-    //     if let Some(ty) = ssa_index_type(func.ops(), SSAIndex(i as u32)) {
-    //         values.add(&mut b, i, ty);
-    //     }
-    // }
+    let mut values = SSAValues::default();
+    for (i, _) in func.ops().iter().enumerate() {
+        if let Some(ty) = ssa_index_type(func.ops(), SSAIndex(i as u32)) {
+            values.add(&mut b, i, ty);
+        }
+    }
 
     let blocks = BasicBlocks::new(func.ops(), &func.labels, &func.label_pool);
     println!("{blocks:?}");
@@ -62,17 +63,16 @@ fn compile_func(func: &Func, jit: &mut Jit) {
              args,
          }| (start, args, &func.ops()[start..end]),
     );
-    let mut values = SSAValues::default();
     for (start, args, block) in blocks {
         let cblock = *block_map.get(&start).unwrap();
         b.switch_to_block(cblock);
         if start == 0 {
             b.append_block_params_for_function_params(cblock);
         }
-        for arg in args {
-            let param = b.append_block_param(cblock, ssa_index_type(func.ops(), arg).unwrap());
-            values.add(arg, param);
-        }
+        // for arg in args {
+        //     let param = b.append_block_param(cblock, ssa_index_type(func.ops(), arg).unwrap());
+        //     values.add(arg, param);
+        // }
         compile_block(
             block,
             start,
@@ -83,7 +83,7 @@ fn compile_func(func: &Func, jit: &mut Jit) {
             &mut b,
             &mut values,
         );
-        values.clear();
+        // values.clear();
     }
 
     // TODO: A counter for jumps to a given block would let me seal sooner
@@ -119,7 +119,8 @@ fn compile_block(
             Opcode::LiteralS2(_) => todo!(),
             Opcode::LiteralS4(c) => {
                 let value = b.ins().iconst(types::I32, c as i64);
-                values.add(i, value);
+                // values.add(i, value);
+                values.set(i, b, value);
             }
             Opcode::LiteralS8(_) => todo!(),
             Opcode::LiteralU1(_) => todo!(),
@@ -128,41 +129,50 @@ fn compile_block(
             Opcode::LiteralU8(_) => todo!(),
             Opcode::LiteralF4(c) => {
                 let value = b.ins().f32const(c.0);
-                values.add(i, value);
+                // values.add(i, value);
+                values.set(i, b, value);
             }
             Opcode::LiteralF8(_) => todo!(),
             Opcode::Add(lhs, rhs) => {
-                let lhs = values.get(lhs).unwrap();
-                let rhs = values.get(rhs).unwrap();
+                // let lhs = values.get(lhs).unwrap();
+                // let rhs = values.get(rhs).unwrap();
+                let lhs = values.get(lhs, b).unwrap();
+                let rhs = values.get(rhs, b).unwrap();
                 let lhs_ty = b.func.dfg.value_type(lhs);
                 let rhs_ty = b.func.dfg.value_type(rhs);
                 if lhs_ty.is_int() && rhs_ty.is_int() && lhs_ty.bits() == rhs_ty.bits() {
                     let value = b.ins().iadd(lhs, rhs);
-                    values.add(i, value);
+                    // values.add(i, value);
+                    values.set(i, b, value);
                 } else if lhs_ty.is_float() && rhs_ty.is_float() && lhs_ty.bits() == rhs_ty.bits() {
                     let value = b.ins().fadd(lhs, rhs);
-                    values.add(i, value);
+                    // values.add(i, value);
+                    values.set(i, b, value);
                 } else {
                     panic!("attempted to add a float to an int and/or differently sized numerics")
                 }
             }
             Opcode::Mult(lhs, rhs) => {
-                let lhs = values.get(lhs).unwrap();
-                let rhs = values.get(rhs).unwrap();
+                // let lhs = values.get(lhs).unwrap();
+                // let rhs = values.get(rhs).unwrap();
+                let lhs = values.get(lhs, b).unwrap();
+                let rhs = values.get(rhs, b).unwrap();
                 let lhs_ty = b.func.dfg.value_type(lhs);
                 let rhs_ty = b.func.dfg.value_type(rhs);
                 if lhs_ty.is_int() && rhs_ty.is_int() && lhs_ty.bits() == rhs_ty.bits() {
                     let value = b.ins().imul(lhs, rhs);
-                    values.add(i, value);
+                    // values.add(i, value);
+                    values.set(i, b, value);
                 } else if lhs_ty.is_float() && rhs_ty.is_float() && lhs_ty.bits() == rhs_ty.bits() {
                     let value = b.ins().fmul(lhs, rhs);
-                    values.add(i, value);
+                    // values.add(i, value);
+                    values.set(i, b, value);
                 } else {
                     panic!("attempted to add a float to an int and/or differently sized numerics")
                 }
             }
             Opcode::Ret(offset) => {
-                let value = values.get(offset).unwrap();
+                let value = values.get(offset, b).unwrap();
                 b.ins().return_(&[value]);
             }
             Opcode::Jump(target) => {
@@ -175,7 +185,7 @@ fn compile_block(
                 default,
                 targets,
             } => {
-                let pred = values.get(pred).unwrap();
+                let pred = values.get(pred, b).unwrap();
                 let default_opcode = labels[default.0 as usize];
                 let default = b
                     .func
@@ -199,57 +209,57 @@ fn compile_block(
     }
 }
 
-#[derive(Default)]
-struct SSAValues {
-    values: HashMap<SSAIndex, Value>,
-}
-
-impl SSAValues {
-    pub fn get(&self, index: SSAIndex) -> Option<Value> {
-        self.values.get(&index).copied()
-    }
-
-    pub fn add(&mut self, index: SSAIndex, value: Value) {
-        assert_eq!(self.values.insert(index, value), None);
-    }
-
-    pub fn clear(&mut self) {
-        self.values.clear();
-    }
-}
-
 // #[derive(Default)]
 // struct SSAValues {
-//     values: HashMap<usize, Variable>,
-//     counter: usize,
+//     values: HashMap<SSAIndex, Value>,
 // }
 
 // impl SSAValues {
-//     pub fn get(&self, index: SSAIndex, b: &mut FunctionBuilder) -> Option<Value> {
-//         self.values
-//             .get(&(index.0 as usize))
-//             .map(|&var| b.use_var(var))
+//     pub fn get(&self, index: SSAIndex) -> Option<Value> {
+//         self.values.get(&index).copied()
 //     }
 
-//     pub fn set(&self, index: SSAIndex, b: &mut FunctionBuilder, value: Value) {
-//         if let Some(&var) = self.values.get(&(index.0 as usize)) {
-//             b.def_var(var, value)
-//         }
+//     pub fn add(&mut self, index: SSAIndex, value: Value) {
+//         assert_eq!(self.values.insert(index, value), None);
 //     }
 
-//     pub fn add(&mut self, b: &mut FunctionBuilder, index: usize, ty: Type) -> Variable {
-//         let next = self.next_var();
-//         assert_eq!(self.values.insert(index, next), None);
-//         b.declare_var(next, ty);
-//         next
-//     }
-
-//     fn next_var(&mut self) -> Variable {
-//         let var = Variable::new(self.counter);
-//         self.counter += 1;
-//         var
+//     pub fn clear(&mut self) {
+//         self.values.clear();
 //     }
 // }
+
+#[derive(Default)]
+struct SSAValues {
+    values: HashMap<usize, Variable>,
+    counter: usize,
+}
+
+impl SSAValues {
+    pub fn get(&self, index: SSAIndex, b: &mut FunctionBuilder) -> Option<Value> {
+        self.values
+            .get(&(index.0 as usize))
+            .map(|&var| b.use_var(var))
+    }
+
+    pub fn set(&self, index: SSAIndex, b: &mut FunctionBuilder, value: Value) {
+        if let Some(&var) = self.values.get(&(index.0 as usize)) {
+            b.def_var(var, value)
+        }
+    }
+
+    pub fn add(&mut self, b: &mut FunctionBuilder, index: usize, ty: Type) -> Variable {
+        let next = self.next_var();
+        assert_eq!(self.values.insert(index, next), None);
+        b.declare_var(next, ty);
+        next
+    }
+
+    fn next_var(&mut self) -> Variable {
+        let var = Variable::new(self.counter);
+        self.counter += 1;
+        var
+    }
+}
 
 #[derive(Clone, Debug)]
 struct BasicBlock {
