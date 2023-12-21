@@ -60,10 +60,9 @@ fn compile_func(func: &Func, jit: &mut Jit) {
     let blocks = blocks.0.into_iter().map(
         |BasicBlock {
              bounds: (start, end),
-             args,
-         }| (start, args, &func.ops()[start..end]),
+         }| (start, &func.ops()[start..end]),
     );
-    for (start, args, block) in blocks {
+    for (start, block) in blocks {
         let cblock = *block_map.get(&start).unwrap();
         b.switch_to_block(cblock);
         if start == 0 {
@@ -171,7 +170,7 @@ fn compile_block(
                     panic!("attempted to add a float to an int and/or differently sized numerics")
                 }
             }
-            Opcode::Ret(offset) => {
+            Opcode::Return(offset) => {
                 let value = values.get(offset, b).unwrap();
                 b.ins().return_(&[value]);
             }
@@ -264,7 +263,6 @@ impl SSAValues {
 #[derive(Clone, Debug)]
 struct BasicBlock {
     bounds: (usize, usize),
-    args: Vec<SSAIndex>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -276,29 +274,25 @@ impl BasicBlocks {
         let mut blocks = BasicBlocks::default();
         for start in starts.iter().map(|start| start.0 as usize) {
             let mut cursor = start + 1;
-            let mut args = vec![];
             loop {
                 match ops.get(cursor - 1) {
                     Some(op) => match op {
                         Opcode::Jump(_) => {
                             blocks.0.push(BasicBlock {
                                 bounds: (start, cursor),
-                                args,
                             });
                             break;
                         }
                         Opcode::Branch { .. } => {
                             blocks.0.push(BasicBlock {
                                 bounds: (start, cursor),
-                                args,
                             });
                             break;
                         }
-                        &Opcode::Ret(i) => {
+                        &Opcode::Return(i) => {
                             i.check(start..cursor, &mut args);
                             blocks.0.push(BasicBlock {
                                 bounds: (start, cursor),
-                                args,
                             });
                             break;
                         }
@@ -322,7 +316,6 @@ impl BasicBlocks {
                         // TODO: Return an error for not ending function properly
                         blocks.0.push(BasicBlock {
                             bounds: (start, cursor - 1),
-                            args,
                         });
                         break;
                     }
@@ -333,8 +326,8 @@ impl BasicBlocks {
         blocks
     }
 
-    fn starts(ops: &[Opcode], labels: &[SSAIndex], label_pool: &[LabelIndex]) -> Vec<SSAIndex> {
-        let mut starts = HashSet::<_, RandomState>::from_iter([SSAIndex(0)]);
+    fn starts(ops: &[Opcode], labels: &[SSAIndex], label_pool: &[LabelIndex]) -> HashSet<SSAIndex> {
+        let mut starts = HashSet::from_iter([SSAIndex(0)]);
         for op in ops {
             match op {
                 Opcode::Jump(target) => {
@@ -353,7 +346,7 @@ impl BasicBlocks {
                 | Opcode::LiteralF8(_)
                 | Opcode::Add(_, _)
                 | Opcode::Mult(_, _)
-                | Opcode::Ret(_)
+                | Opcode::Return(_)
                 | Opcode::Nop => continue,
                 Opcode::Branch {
                     default, targets, ..
@@ -365,8 +358,6 @@ impl BasicBlocks {
                 }
             }
         }
-        let mut starts: Vec<SSAIndex> = starts.into_iter().collect();
-        starts.sort();
         starts
     }
 
@@ -396,7 +387,7 @@ fn ssa_index_type(ops: &[Opcode], value: SSAIndex) -> Option<Type> {
             let r = ssa_index_type(ops, r).unwrap();
             arithmetic_result_type(l, r)
         }
-        Opcode::Ret(_) | Opcode::Jump(_) | Opcode::Branch { .. } | Opcode::Nop => return None,
+        Opcode::Return(_) | Opcode::Jump(_) | Opcode::Branch { .. } | Opcode::Nop => return None,
     })
 }
 

@@ -82,7 +82,7 @@ impl Func {
                 | Opcode::LiteralF8(_)
                 | Opcode::Add(_, _)
                 | Opcode::Mult(_, _)
-                | Opcode::Ret(_)
+                | Opcode::Return(_)
                 | Opcode::Jump(_)
                 | Opcode::Nop => (),
                 Opcode::Branch { targets, .. } => shift(targets),
@@ -136,7 +136,7 @@ impl Func {
                 | Opcode::LiteralF4(_)
                 | Opcode::LiteralF8(_)
                 | Opcode::Jump(_) => (),
-                Opcode::Ret(i) => map!(i),
+                Opcode::Return(i) => map!(i),
                 Opcode::Add(i, j) => map!(i, j),
                 Opcode::Mult(i, j) => map!(i, j),
                 Opcode::Branch { pred, .. } => map!(pred),
@@ -228,7 +228,7 @@ pub enum Opcode {
     LiteralF8(BinaryF64),
     Add(SSAIndex, SSAIndex),
     Mult(SSAIndex, SSAIndex),
-    Ret(SSAIndex),
+    Return(SSAIndex),
     Jump(LabelIndex),
     Branch {
         pred: SSAIndex,

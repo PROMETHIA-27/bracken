@@ -113,7 +113,11 @@ fn compile_expr(expr: &Expr, func: &mut Func, scopes: &mut Vec<Scope>) -> SSAInd
             let pred = compile_expr(pred, func, scopes);
             let fallthrough = func.add_label();
             let targets = func.push_label_slice(&[fallthrough]);
-            func.push_op(Opcode::Branch { pred, default: after_loop, targets });
+            func.push_op(Opcode::Branch {
+                pred,
+                default: after_loop,
+                targets,
+            });
             func.set_label(fallthrough, SSAIndex(func.ops().len() as u32));
             scopes.push(Scope { end: after_loop });
             compile_stmts(body, func, scopes);
@@ -132,7 +136,7 @@ fn compile_expr(expr: &Expr, func: &mut Func, scopes: &mut Vec<Scope>) -> SSAInd
             // TODO: Empty returns
             let val = val.as_ref().unwrap();
             let val = compile_expr(val, func, scopes);
-            func.push_op(Opcode::Ret(val))
+            func.push_op(Opcode::Return(val))
         }
     }
 }
