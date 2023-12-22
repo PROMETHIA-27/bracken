@@ -7,6 +7,7 @@ use thiserror::Error;
 
 pub mod ast;
 pub mod bytecode;
+pub mod nameres;
 
 #[cfg(feature = "fern")]
 lalrpop_mod!(pub parser);

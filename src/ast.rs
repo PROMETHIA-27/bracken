@@ -55,7 +55,7 @@ pub enum Stmt {
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub enum Expr {
-    Let { name: String, value: Box<Expr> },
+    Let { name: String, ty: Option<String>, value: Box<Expr> },
     Set { name: String, value: Box<Expr> },
     Local(String),
     Literal(i32),

@@ -1,29 +1,23 @@
 use crate::ast::{File, FnDef, Expr, Stmt, Stmts};
 use std::str::FromStr;
-use std::collections::HashMap;
 
 grammar;
 
-pub File: File = {
-    <def:FnDef> <mut file:File> => { 
-        let name = def.name.clone();
-        file.defs.push(def); 
-        file.def_ids.insert(name, file.defs.len() - 1);
-        file 
-    },
-    => File { defs: vec![], def_ids: HashMap::new() },
-}
+pub File: File =
+    <defs:FnDef*> => 
+    File {
+        def_ids: defs
+            .iter()
+            .enumerate()
+            .map(|(i, def)| (def.name.clone(), i))
+            .collect(),
+        defs,
+    };
 
 pub FnDef: FnDef = 
     "function" <name:Ident> "()" <body:Stmts> "end" => FnDef { name, body };
 
-pub Stmts: Stmts = {
-    <mut stmts:Stmts> <stmt:Stmt> => {
-        stmts.0.push(stmt);
-        stmts
-    },
-    => Stmts(vec![]),
-}
+pub Stmts: Stmts = <Stmt*> => Stmts(<>);
 
 pub Stmt: Stmt = {
     <Expr> => Stmt::Expr(<>),
@@ -32,7 +26,7 @@ pub Stmt: Stmt = {
 pub Expr = AssignExpr;
 
 pub AssignExpr: Expr = {
-    "let" <name:Ident> "=" <value:AssignExpr> => Expr::Let { name, value: Box::new(value) },
+    "let" <name:Ident> <ty:(":" <Ident>)?> "=" <value:AssignExpr> => Expr::Let { name, ty, value: Box::new(value) },
     <name:Ident> "=" <value:AssignExpr> => Expr::Set { name, value: Box::new(value) },
     ValueExpr,
 }
@@ -57,10 +51,8 @@ pub Factor: Expr = {
     "(" <Expr> ")" => <>,
 }
 
-pub Return: Expr = {
-    "return" "(" <value:Expr> ")" => Expr::Return(Some(Box::new(value))),
-    "return" "(" ")" => Expr::Return(None),
-}
+pub Return: Expr =
+    "return" "(" <value:Expr?> ")" => Expr::Return(value.map(Box::new));
 
 pub While: Expr = 
     "while" <pred:Expr> <body:Stmts> "end" => Expr::While { pred: Box::new(pred), body };

@@ -1,8 +1,7 @@
-use std::collections::HashMap;
-
 use bincode::{DefaultOptions, Options};
 use bracken::ast::{Expr, File, FnDef, Stmt, Stmts};
 use bracken::bytecode::{Func, LabelIndex, Module, Opcode, OpcodeIndex, Type};
+use bracken::nameres::{Scope, ScopeStack};
 use bracken::parser::FileParser;
 use bracken::{Errors, OneOf};
 use comemo::{memoize, track, Track, Tracked};
@@ -82,15 +81,12 @@ fn compile_func(def: Tracked<FnDef>) -> Func {
         label_pool: vec![],
         locals: vec![],
     };
-    compile_stmts(
-        def.body(),
-        &mut func,
-        &mut ScopeStack {
-            scopes: vec![Scope::new(LabelIndex::new(0))],
-        },
-    );
-    func.labels[0] = OpcodeIndex::new(func.opcodes.len());
+    let mut stack = ScopeStack::new();
+    stack.push(Scope::new(LabelIndex::new(0)));
 
+    compile_stmts(def.body(), &mut func, &mut stack);
+
+    func.labels[0] = OpcodeIndex::new(func.opcodes.len());
     func
 }
 
@@ -102,54 +98,9 @@ fn compile_stmts<'f>(stmts: &'f Stmts, func: &mut Func, scopes: &mut ScopeStack<
     }
 }
 
-struct Scope<'f> {
-    end: LabelIndex,
-    locals: HashMap<&'f str, u32>,
-}
-
-impl<'f> Scope<'f> {
-    pub fn new(end: LabelIndex) -> Self {
-        Self {
-            end,
-            locals: HashMap::default(),
-        }
-    }
-}
-
-struct ScopeStack<'f> {
-    scopes: Vec<Scope<'f>>,
-}
-
-impl<'f> ScopeStack<'f> {
-    fn local(&self, name: &str) -> Option<u32> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(&local) = scope.locals.get(name) {
-                return Some(local);
-            }
-        }
-        None
-    }
-
-    fn add_local(&mut self, name: &'f str, local: u32) {
-        self.scopes.last_mut().unwrap().locals.insert(name, local);
-    }
-
-    fn top(&self) -> &Scope {
-        self.scopes.last().unwrap()
-    }
-
-    fn push(&mut self, scope: Scope<'f>) {
-        self.scopes.push(scope);
-    }
-
-    fn pop(&mut self) {
-        self.scopes.pop();
-    }
-}
-
 fn compile_expr<'f>(expr: &'f Expr, func: &mut Func, scopes: &mut ScopeStack<'f>) {
     match expr {
-        Expr::Let { name, value } => {
+        Expr::Let { name, value, .. } => {
             compile_expr(value, func, scopes);
             let local = func.locals.len().try_into().unwrap();
             scopes.add_local(name, local);
@@ -210,7 +161,7 @@ fn compile_expr<'f>(expr: &'f Expr, func: &mut Func, scopes: &mut ScopeStack<'f>
             // TODO: Non-empty breaks
             _ = val;
             // TODO: Good error on break without scope
-            let label = scopes.top().end;
+            let label = scopes.top().end();
             func.push_op(Opcode::Jump(label));
         }
         Expr::Return(val) => {
@@ -225,7 +176,7 @@ fn compile_expr<'f>(expr: &'f Expr, func: &mut Func, scopes: &mut ScopeStack<'f>
 fn type_of_expr(expr: &Expr, func: &Func, scope: &Scope) -> Type {
     match expr {
         Expr::Local(local) => {
-            let local = *scope.locals.get(local.as_str()).unwrap();
+            let local = *scope.locals().get(local.as_str()).unwrap();
             *func.locals.get::<usize>(local.try_into().unwrap()).unwrap()
         }
         Expr::Literal(_) => Type::S4,
