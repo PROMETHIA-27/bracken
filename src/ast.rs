@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
+use comemo::track;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct File {
     pub def_ids: HashMap<String, usize>,
@@ -17,7 +19,7 @@ impl Hash for File {
     }
 }
 
-#[cfg_attr(feature = "fern", comemo::track)]
+#[track]
 impl File {
     pub fn def(&self, name: &str) -> &FnDef {
         &self.defs[self.def_ids[name]]
@@ -34,7 +36,7 @@ pub struct FnDef {
     pub body: Stmts,
 }
 
-#[cfg_attr(feature = "fern", comemo::track)]
+#[track]
 impl FnDef {
     pub fn name(&self) -> &str {
         &self.name
@@ -55,14 +57,24 @@ pub enum Stmt {
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub enum Expr {
-    Let { name: String, ty: Option<String>, value: Box<Expr> },
-    Set { name: String, value: Box<Expr> },
+    Let {
+        name: String,
+        ty: Option<String>,
+        value: Box<Expr>,
+    },
+    Set {
+        name: String,
+        value: Box<Expr>,
+    },
     Local(String),
     Literal(i32),
     Plus(Box<Expr>, Box<Expr>),
     Minus(Box<Expr>, Box<Expr>),
     Times(Box<Expr>, Box<Expr>),
-    While { pred: Box<Expr>, body: Stmts },
+    While {
+        pred: Box<Expr>,
+        body: Stmts,
+    },
     Break(Option<Box<Expr>>),
     Return(Option<Box<Expr>>),
 }

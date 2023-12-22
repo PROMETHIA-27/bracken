@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use bincode::{DefaultOptions, Options};
-use bracken::bytecode::{self, Func, LabelIndex, Opcode, OpcodeIndex};
+use bracken::bytecode::{self, Function, LabelIndex, Opcode, OpcodeIndex};
 use cm::Module;
 use cranelift_codegen::entity::EntityRef;
 use cranelift_codegen::ir::{
-    types, AbiParam, Block, BlockCall, Function, InstBuilder, JumpTableData, Type, Value,
+    types, AbiParam, Block, BlockCall, Function as CFunction, InstBuilder, JumpTableData, Type,
+    Value,
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
@@ -33,14 +34,14 @@ struct Jit {
     module: JITModule,
 }
 
-fn compile_func(func: &Func, jit: &mut Jit) {
+fn compile_func(func: &Function, jit: &mut Jit) {
     let mut sig = jit.module.make_signature();
     sig.returns = vec![AbiParam::new(types::I32)];
     let func_id = jit
         .module
         .declare_function(&func.name, cranelift_module::Linkage::Export, &sig)
         .unwrap();
-    let mut cfunc = Function::new();
+    let mut cfunc = CFunction::new();
     cfunc.signature = sig;
 
     let mut fnctx = FunctionBuilderContext::new();
@@ -203,7 +204,7 @@ struct BasicBlock {
 pub struct BasicBlocks(Vec<BasicBlock>);
 
 impl BasicBlocks {
-    fn new(ops: &[Opcode], func: &Func) -> Self {
+    fn new(ops: &[Opcode], func: &Function) -> Self {
         let starts = Self::starts(ops, &func.labels, &func.label_pool);
         let mut blocks = BasicBlocks::default();
         for start in starts.iter().map(|start| start.index()) {
@@ -301,7 +302,7 @@ impl BasicBlocks {
     }
 }
 
-fn compute_block_params(block: &[Opcode], func: &Func) -> Vec<Type> {
+fn compute_block_params(block: &[Opcode], func: &Function) -> Vec<Type> {
     let mut inputs = vec![];
     let mut stack = vec![];
 

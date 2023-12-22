@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Module {
-    pub funcs: Vec<Func>,
+    pub funcs: Vec<Function>,
 }
 
 #[derive(Clone, Copy, Debug, Hash, Serialize, Deserialize, PartialEq)]
@@ -17,7 +17,6 @@ pub enum Type {
 }
 
 impl Type {
-    #[cfg(feature = "cranelift")]
     pub fn clif_type(self) -> Option<cranelift_codegen::ir::Type> {
         match self {
             Type::S4 => Some(cranelift_codegen::ir::types::I32),
@@ -26,7 +25,6 @@ impl Type {
         }
     }
 
-    #[cfg(feature = "cranelift")]
     pub fn from_clif_type(ty: cranelift_codegen::ir::Type) -> Option<Self> {
         if ty == cranelift_codegen::ir::types::I32 {
             Some(Type::S4)
@@ -39,7 +37,7 @@ impl Type {
 }
 
 #[derive(Clone, Debug, Hash, Serialize, Deserialize, PartialEq)]
-pub struct Func {
+pub struct Function {
     pub name: String,
     pub opcodes: Vec<Opcode>,
     pub labels: Vec<OpcodeIndex>,
@@ -47,7 +45,7 @@ pub struct Func {
     pub locals: Vec<Type>,
 }
 
-impl Func {
+impl Function {
     pub fn op(&self, id: OpcodeIndex) -> Opcode {
         self.opcodes[id.0 as usize]
     }
@@ -61,7 +59,7 @@ impl Func {
     }
 }
 
-impl Func {
+impl Function {
     pub fn push_op(&mut self, op: Opcode) -> OpcodeIndex {
         self.opcodes.push(op);
         OpcodeIndex((self.opcodes.len() - 1) as u32)
