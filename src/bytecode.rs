@@ -9,12 +9,42 @@ pub struct Module {
     pub funcs: Vec<Func>,
 }
 
+#[derive(Clone, Copy, Debug, Hash, Serialize, Deserialize, PartialEq)]
+pub enum Type {
+    S4,
+    F4,
+    Void,
+}
+
+impl Type {
+    #[cfg(feature = "cranelift")]
+    pub fn clif_type(self) -> Option<cranelift_codegen::ir::Type> {
+        match self {
+            Type::S4 => Some(cranelift_codegen::ir::types::I32),
+            Type::F4 => Some(cranelift_codegen::ir::types::F32),
+            Type::Void => None,
+        }
+    }
+
+    #[cfg(feature = "cranelift")]
+    pub fn from_clif_type(ty: cranelift_codegen::ir::Type) -> Option<Self> {
+        if ty == cranelift_codegen::ir::types::I32 {
+            Some(Type::S4)
+        } else if ty == cranelift_codegen::ir::types::F32 {
+            Some(Type::F4)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, Serialize, Deserialize, PartialEq)]
 pub struct Func {
     pub name: String,
     pub opcodes: Vec<Opcode>,
     pub labels: Vec<OpcodeIndex>,
     pub label_pool: Vec<LabelIndex>,
+    pub locals: Vec<Type>,
 }
 
 impl Func {
@@ -24,6 +54,10 @@ impl Func {
 
     pub fn ops(&self) -> &[Opcode] {
         &self.opcodes
+    }
+
+    pub fn local(&self, local: u32) -> Type {
+        self.locals[usize::try_from(local).unwrap()]
     }
 }
 
@@ -81,10 +115,13 @@ impl Func {
                 | Opcode::LiteralF4(_)
                 | Opcode::LiteralF8(_)
                 | Opcode::Add
+                | Opcode::Sub
                 | Opcode::Mult
                 | Opcode::Return
                 | Opcode::Jump(_)
-                | Opcode::Nop => (),
+                | Opcode::Nop
+                | Opcode::StoreLocal(_)
+                | Opcode::LoadLocal(_) => (),
                 Opcode::Branch { targets, .. } => shift(targets),
             }
         }
@@ -196,6 +233,7 @@ pub enum Opcode {
     LiteralF4(BinaryF32),
     LiteralF8(BinaryF64),
     Add,
+    Sub,
     Mult,
     Return,
     Jump(LabelIndex),
@@ -203,5 +241,7 @@ pub enum Opcode {
         default: LabelIndex,
         targets: LabelPoolSlice,
     },
+    StoreLocal(u32),
+    LoadLocal(u32),
     Nop,
 }

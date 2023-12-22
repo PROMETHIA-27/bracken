@@ -1,6 +1,9 @@
 function main()
-    while 1
-        break
+    let x = 0
+    let y = 0
+    while x - 10
+        x = x + 1
+        y = x * 2
     end
-    return(27)
+    return(y)
 end

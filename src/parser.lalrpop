@@ -29,12 +29,18 @@ pub Stmt: Stmt = {
     <Expr> => Stmt::Expr(<>),
 }
 
-pub Expr: Expr = {
-    <l:Expr> "+" <r:Term> => Expr::Plus(Box::new(l), Box::new(r)),
+pub Expr = AssignExpr;
+
+pub AssignExpr: Expr = {
+    "let" <name:Ident> "=" <value:AssignExpr> => Expr::Let { name, value: Box::new(value) },
+    <name:Ident> "=" <value:AssignExpr> => Expr::Set { name, value: Box::new(value) },
+    ValueExpr,
+}
+
+pub ValueExpr: Expr = {
+    <l:ValueExpr> "+" <r:Term> => Expr::Plus(Box::new(l), Box::new(r)),
+    <l:ValueExpr> "-" <r:Term> => Expr::Minus(Box::new(l), Box::new(r)),
     Term,
-    While,
-    Break,
-    Return,
 }
 
 pub Term: Expr = {
@@ -43,7 +49,17 @@ pub Term: Expr = {
 }
 
 pub Factor: Expr = {
+    Return,
+    While,
+    Break,
     <Literal> => Expr::Literal(<>),
+    <Ident> => Expr::Local(<>),
+    "(" <Expr> ")" => <>,
+}
+
+pub Return: Expr = {
+    "return" "(" <value:Expr> ")" => Expr::Return(Some(Box::new(value))),
+    "return" "(" ")" => Expr::Return(None),
 }
 
 pub While: Expr = 
@@ -51,11 +67,6 @@ pub While: Expr =
 
 pub Break: Expr = {
     "break" => Expr::Break(None),
-}
-
-pub Return: Expr = {
-    "return" "(" <value:Expr> ")" => Expr::Return(Some(Box::new(value))),
-    "return" "(" ")" => Expr::Return(None),
 }
 
 pub Literal: i32 = <r"[0-9]+"> => i32::from_str(<>).unwrap();

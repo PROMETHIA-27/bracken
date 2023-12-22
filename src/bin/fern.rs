@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use bincode::{DefaultOptions, Options};
 use bracken::ast::{Expr, File, FnDef, Stmt, Stmts};
-use bracken::bytecode::{Func, LabelIndex, Module, Opcode, OpcodeIndex};
+use bracken::bytecode::{Func, LabelIndex, Module, Opcode, OpcodeIndex, Type};
 use bracken::parser::FileParser;
 use bracken::{Errors, OneOf};
 use comemo::{memoize, track, Track, Tracked};
@@ -76,14 +78,23 @@ fn compile_func(def: Tracked<FnDef>) -> Func {
     let mut func = Func {
         name: def.name().to_string(),
         opcodes: vec![],
-        labels: vec![],
+        labels: vec![OpcodeIndex::UNSET],
         label_pool: vec![],
+        locals: vec![],
     };
-    compile_stmts(def.body(), &mut func, &mut vec![]);
+    compile_stmts(
+        def.body(),
+        &mut func,
+        &mut ScopeStack {
+            scopes: vec![Scope::new(LabelIndex::new(0))],
+        },
+    );
+    func.labels[0] = OpcodeIndex::new(func.opcodes.len());
+
     func
 }
 
-fn compile_stmts(stmts: &Stmts, func: &mut Func, scopes: &mut Vec<Scope>) {
+fn compile_stmts<'f>(stmts: &'f Stmts, func: &mut Func, scopes: &mut ScopeStack<'f>) {
     for stmt in &stmts.0 {
         match stmt {
             Stmt::Expr(expr) => compile_expr(expr, func, scopes),
@@ -91,12 +102,69 @@ fn compile_stmts(stmts: &Stmts, func: &mut Func, scopes: &mut Vec<Scope>) {
     }
 }
 
-struct Scope {
+struct Scope<'f> {
     end: LabelIndex,
+    locals: HashMap<&'f str, u32>,
 }
 
-fn compile_expr(expr: &Expr, func: &mut Func, scopes: &mut Vec<Scope>) {
+impl<'f> Scope<'f> {
+    pub fn new(end: LabelIndex) -> Self {
+        Self {
+            end,
+            locals: HashMap::default(),
+        }
+    }
+}
+
+struct ScopeStack<'f> {
+    scopes: Vec<Scope<'f>>,
+}
+
+impl<'f> ScopeStack<'f> {
+    fn local(&self, name: &str) -> Option<u32> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(&local) = scope.locals.get(name) {
+                return Some(local);
+            }
+        }
+        None
+    }
+
+    fn add_local(&mut self, name: &'f str, local: u32) {
+        self.scopes.last_mut().unwrap().locals.insert(name, local);
+    }
+
+    fn top(&self) -> &Scope {
+        self.scopes.last().unwrap()
+    }
+
+    fn push(&mut self, scope: Scope<'f>) {
+        self.scopes.push(scope);
+    }
+
+    fn pop(&mut self) {
+        self.scopes.pop();
+    }
+}
+
+fn compile_expr<'f>(expr: &'f Expr, func: &mut Func, scopes: &mut ScopeStack<'f>) {
     match expr {
+        Expr::Let { name, value } => {
+            compile_expr(value, func, scopes);
+            let local = func.locals.len().try_into().unwrap();
+            scopes.add_local(name, local);
+            func.locals.push(type_of_expr(value, func, scopes.top()));
+            func.push_op(Opcode::StoreLocal(local));
+        }
+        Expr::Set { name, value } => {
+            compile_expr(value, func, scopes);
+            let local = scopes.local(name).unwrap();
+            func.push_op(Opcode::StoreLocal(local));
+        }
+        Expr::Local(name) => {
+            let local = scopes.local(name).expect("unbound name");
+            func.push_op(Opcode::LoadLocal(local));
+        }
         &Expr::Literal(constant) => {
             func.push_op(Opcode::LiteralS4(constant));
         }
@@ -105,23 +173,36 @@ fn compile_expr(expr: &Expr, func: &mut Func, scopes: &mut Vec<Scope>) {
             compile_expr(rhs, func, scopes);
             func.push_op(Opcode::Add);
         }
+        Expr::Minus(lhs, rhs) => {
+            compile_expr(lhs, func, scopes);
+            compile_expr(rhs, func, scopes);
+            func.push_op(Opcode::Sub);
+        }
         Expr::Times(lhs, rhs) => {
             compile_expr(lhs, func, scopes);
             compile_expr(rhs, func, scopes);
             func.push_op(Opcode::Mult);
         }
         Expr::While { pred, body } => {
+            let before_loop = func.add_label();
             let after_loop = func.add_label();
-            compile_expr(pred, func, scopes);
+            let targets = func.push_label_slice(&[after_loop]);
             let fallthrough = func.add_label();
-            let targets = func.push_label_slice(&[fallthrough]);
+
+            func.set_label(before_loop, OpcodeIndex::new(func.ops().len()));
+
+            compile_expr(pred, func, scopes);
             func.push_op(Opcode::Branch {
-                default: after_loop,
+                default: fallthrough,
                 targets,
             });
+
             func.set_label(fallthrough, OpcodeIndex::new(func.ops().len()));
-            scopes.push(Scope { end: after_loop });
+
+            scopes.push(Scope::new(after_loop));
             compile_stmts(body, func, scopes);
+            func.push_op(Opcode::Jump(before_loop));
+
             scopes.pop();
             func.set_label(after_loop, OpcodeIndex::new(func.ops().len()));
         }
@@ -129,7 +210,7 @@ fn compile_expr(expr: &Expr, func: &mut Func, scopes: &mut Vec<Scope>) {
             // TODO: Non-empty breaks
             _ = val;
             // TODO: Good error on break without scope
-            let label = scopes.last().unwrap().end;
+            let label = scopes.top().end;
             func.push_op(Opcode::Jump(label));
         }
         Expr::Return(val) => {
@@ -138,6 +219,27 @@ fn compile_expr(expr: &Expr, func: &mut Func, scopes: &mut Vec<Scope>) {
             compile_expr(val, func, scopes);
             func.push_op(Opcode::Return);
         }
+    }
+}
+
+fn type_of_expr(expr: &Expr, func: &Func, scope: &Scope) -> Type {
+    match expr {
+        Expr::Local(local) => {
+            let local = *scope.locals.get(local.as_str()).unwrap();
+            *func.locals.get::<usize>(local.try_into().unwrap()).unwrap()
+        }
+        Expr::Literal(_) => Type::S4,
+        Expr::Plus(l, r) | Expr::Times(l, r) | Expr::Minus(l, r) => {
+            let l = type_of_expr(l, func, scope);
+            let r = type_of_expr(r, func, scope);
+            assert_eq!(l, r);
+            l
+        }
+        Expr::Let { .. }
+        | Expr::Set { .. }
+        | Expr::While { .. }
+        | Expr::Break(_)
+        | Expr::Return(_) => Type::Void,
     }
 }
 

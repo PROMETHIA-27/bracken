@@ -55,8 +55,12 @@ pub enum Stmt {
 
 #[derive(Clone, Debug, Hash, PartialEq)]
 pub enum Expr {
+    Let { name: String, value: Box<Expr> },
+    Set { name: String, value: Box<Expr> },
+    Local(String),
     Literal(i32),
     Plus(Box<Expr>, Box<Expr>),
+    Minus(Box<Expr>, Box<Expr>),
     Times(Box<Expr>, Box<Expr>),
     While { pred: Box<Expr>, body: Stmts },
     Break(Option<Box<Expr>>),
