@@ -1,8 +1,11 @@
+use std::cell::RefCell;
+
 use bincode::{DefaultOptions, Options};
 use comemo::{memoize, Track, Tracked};
 use thiserror::Error;
 
-use crate::ast::{Expr, File, FnDef, Stmt, Stmts};
+use crate::arena::IndexedArena;
+use crate::ast::{Ast, Expr, FnDef, Stmt, Stmts};
 use crate::bytecode::{Function, Module, Opcode, OpcodeIndex, Type};
 use crate::error::{Errors, OneOf};
 use crate::nameres::{Scope, ScopeStack};
@@ -46,29 +49,35 @@ pub enum ParseError {
     ExtraToken,
 }
 
-#[memoize]
-pub fn parse_ast(source: String) -> Result<File, ParseError> {
-    FileParser::new().parse(&source).map_err(|err| match err {
-        lalrpop_util::ParseError::InvalidToken { location } => ParseError::InvalidToken(location),
-        lalrpop_util::ParseError::UnrecognizedEof { .. } => ParseError::UnrecognizedEof,
-        lalrpop_util::ParseError::UnrecognizedToken {
-            token: (l1, t, l2),
-            expected,
-        } => ParseError::UnrecognizedToken(
-            l1,
-            l2,
-            format!("`{t}`"),
-            OneOf::new(expected).expect("unrecognized token with no expected tokens"),
-        ),
-        lalrpop_util::ParseError::ExtraToken { .. } => ParseError::ExtraToken,
-        _ => unreachable!(),
-    })
+// #[memoize]
+pub fn parse_ast<'ast>(source: String) -> Result<Ast<'ast>, ParseError> {
+    let arena = RefCell::new(IndexedArena::new());
+    let file = FileParser::new()
+        .parse(&arena, &source)
+        .map_err(|err| match err {
+            lalrpop_util::ParseError::InvalidToken { location } => {
+                ParseError::InvalidToken(location)
+            }
+            lalrpop_util::ParseError::UnrecognizedEof { .. } => ParseError::UnrecognizedEof,
+            lalrpop_util::ParseError::UnrecognizedToken {
+                token: (l1, t, l2),
+                expected,
+            } => ParseError::UnrecognizedToken(
+                l1,
+                l2,
+                format!("`{t}`"),
+                OneOf::new(expected).expect("unrecognized token with no expected tokens"),
+            ),
+            lalrpop_util::ParseError::ExtraToken { .. } => ParseError::ExtraToken,
+            _ => unreachable!(),
+        })?;
+    Ok(Ast::new(arena.into_inner(), vec![file]))
 }
 
 #[memoize]
 pub fn compute_bytecode(source: String) -> Result<Module, Errors<ParseError>> {
     let ast = parse_ast(source)?;
-    let funcs = ast
+    let funcs = ast.files()[0]
         .defs()
         .iter()
         .map(|def| compile_func(def.track()))
@@ -95,7 +104,7 @@ pub fn compile_func(def: Tracked<FnDef>) -> Function {
 }
 
 pub fn compile_stmts<'f>(stmts: &'f Stmts, func: &mut Function, scopes: &mut ScopeStack<'f>) {
-    for stmt in &stmts.0 {
+    for stmt in stmts.stmts() {
         match stmt {
             Stmt::Expr(expr) => compile_expr(expr, func, scopes),
         }
@@ -202,18 +211,4 @@ fn type_of_expr(expr: &Expr, func: &Function, scope: &Scope) -> Type {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::ast::{Expr, FnDef, Stmt, Stmts};
-    use crate::parser::FnDefParser;
-
-    #[test]
-    fn return_0() {
-        assert_eq!(
-            FnDefParser::new().parse("function main() 0 end").unwrap(),
-            FnDef {
-                name: "main".to_string(),
-                body: Stmts(vec![Stmt::Expr(Expr::Literal(0)),]),
-            }
-        );
-    }
-}
+mod tests {}

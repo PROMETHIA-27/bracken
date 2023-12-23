@@ -1,64 +1,58 @@
-use crate::ast::{File, FnDef, Expr, Stmt, Stmts};
+use std::cell::RefCell;
 use std::str::FromStr;
 
-grammar;
+use crate::arena::{IndexedArena, Id};
+use crate::ast::{IFile, IFnDef, IExpr, IStmt, IStmts};
 
-pub File: File =
-    <defs:FnDef*> => 
-    File {
-        def_ids: defs
-            .iter()
-            .enumerate()
-            .map(|(i, def)| (def.name.clone(), i))
-            .collect(),
-        defs,
-    };
+grammar(arena: &RefCell<IndexedArena<IExpr>>);
 
-pub FnDef: FnDef = 
-    "function" <name:Ident> "()" <body:Stmts> "end" => FnDef { name, body };
+pub File: IFile = <defs:FnDef*> => IFile::new(defs);
 
-pub Stmts: Stmts = <Stmt*> => Stmts(<>);
+pub FnDef: IFnDef = 
+    "function" <name:Ident> "()" <body:Stmts> "end" => IFnDef::new(name, body);
 
-pub Stmt: Stmt = {
-    <Expr> => Stmt::Expr(<>),
+pub Stmts: IStmts = <Stmt*> => IStmts::new(<>);
+
+pub Stmt: IStmt = {
+    <Expr> => IStmt::Expr(<>),
 }
 
 pub Expr = AssignExpr;
 
-pub AssignExpr: Expr = {
-    "let" <name:Ident> <ty:(":" <Ident>)?> "=" <value:AssignExpr> => Expr::Let { name, ty, value: Box::new(value) },
-    <name:Ident> "=" <value:AssignExpr> => Expr::Set { name, value: Box::new(value) },
+pub AssignExpr: Id<IExpr> = {
+    "let" <name:Ident> <ty:(":" <Ident>)?> "=" <value:AssignExpr> => arena.borrow_mut().push(IExpr::Let { name, ty, value }),
+    <name:Ident> "=" <value:AssignExpr> => arena.borrow_mut().push(IExpr::Set { name, value }),
     ValueExpr,
 }
 
-pub ValueExpr: Expr = {
-    <l:ValueExpr> "+" <r:Term> => Expr::Plus(Box::new(l), Box::new(r)),
-    <l:ValueExpr> "-" <r:Term> => Expr::Minus(Box::new(l), Box::new(r)),
+pub ValueExpr: Id<IExpr> = {
+    <l:ValueExpr> "+" <r:Term> => arena.borrow_mut().push(IExpr::Plus(l, r)),
+    <l:ValueExpr> "-" <r:Term> => arena.borrow_mut().push(IExpr::Minus(l, r)),
     Term,
 }
 
-pub Term: Expr = {
-    <l:Term> "*" <r:Factor> => Expr::Times(Box::new(l), Box::new(r)),
+pub Term: Id<IExpr> = {
+    <l:Term> "*" <r:Factor> => arena.borrow_mut().push(IExpr::Times(l, r)),
     Factor,
 }
 
-pub Factor: Expr = {
+pub Factor: Id<IExpr> = {
     Return,
     While,
     Break,
-    <Literal> => Expr::Literal(<>),
-    <Ident> => Expr::Local(<>),
+    <Literal> => arena.borrow_mut().push(IExpr::Literal(<>)),
+    <Ident> => arena.borrow_mut().push(IExpr::Local(<>)),
     "(" <Expr> ")" => <>,
 }
 
-pub Return: Expr =
-    "return" "(" <value:Expr?> ")" => Expr::Return(value.map(Box::new));
+pub Return: Id<IExpr> =
+    "return" "(" <value:Expr?> ")" => arena.borrow_mut().push(IExpr::Return(value));
 
-pub While: Expr = 
-    "while" <pred:Expr> <body:Stmts> "end" => Expr::While { pred: Box::new(pred), body };
+pub While: Id<IExpr> = 
+    "while" <pred:Expr> <body:Stmts> "end" => arena.borrow_mut().push(IExpr::While { pred, body });
 
-pub Break: Expr = {
-    "break" => Expr::Break(None),
+pub Break: Id<IExpr> = {
+    "break" => arena.borrow_mut().push(IExpr::Break(None)),
 }
 
 pub Literal: i32 = <r"[0-9]+"> => i32::from_str(<>).unwrap();

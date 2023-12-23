@@ -1,5 +1,6 @@
 use lalrpop_util::lalrpop_mod;
 
+pub mod arena;
 pub mod ast;
 pub mod bytecode;
 pub mod error;
