@@ -6,7 +6,7 @@ use crate::ast::{IFile, IFnDef, IExpr, IStmt, IStmts};
 
 grammar(arena: &RefCell<IndexedArena<IExpr>>);
 
-pub File: IFile = <defs:FnDef*> => IFile::new(defs);
+pub File: IFile = <defs:FnDef*> => IFile::new(arena.take(), defs);
 
 pub FnDef: IFnDef = 
     "function" <name:Ident> "()" <body:Stmts> "end" => IFnDef::new(name, body);

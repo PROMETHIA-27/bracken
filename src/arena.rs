@@ -53,7 +53,6 @@ impl<T> Default for IndexedArena<T> {
     }
 }
 
-#[derive(Clone)]
 pub struct Arena<T> {
     vec: Vec<T>,
 }
@@ -78,7 +77,8 @@ impl<'ast, T: IntoArena<'ast> + 'ast> Arena<T> {
         &self.vec[id.index()]
     }
 
-    /// # SAFETY:
+    /// Get a reference to the contents of the arena with an extended lifetime.
+    /// # Safety:
     /// - This slice and any references derived from it must be dropped before this arena is dropped.
     pub unsafe fn slice(&self) -> &'ast [T] {
         unsafe { std::mem::transmute::<&[T], &'ast [T]>(&self.vec) }
@@ -90,20 +90,5 @@ impl<T> Drop for Arena<T> {
         for elem in std::mem::take(&mut self.vec).into_iter().rev() {
             drop(elem);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::Id;
-
-    enum E<'a> {
-        U,
-        T(&'a E<'a>),
-    }
-
-    enum I {
-        U,
-        T(Id<I>),
     }
 }

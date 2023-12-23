@@ -6,55 +6,16 @@ use comemo::track;
 use crate::arena::{Arena, Id, IndexedArena, IntoArena};
 
 #[derive(Clone)]
-pub struct Ast<'ast> {
-    exprs: Arena<Expr<'ast>>,
-    files: Vec<File<'ast>>,
-}
-
-impl<'ast> Hash for Ast<'ast> {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.files.hash(state);
-    }
-}
-
-impl<'ast> PartialEq for Ast<'ast> {
-    fn eq(&self, other: &Self) -> bool {
-        self.files == other.files
-    }
-}
-
-impl<'ast> Drop for Ast<'ast> {
-    fn drop(&mut self) {
-        drop(std::mem::take(&mut self.files));
-        _ = self.exprs;
-    }
-}
-
-impl<'ast> Ast<'ast> {
-    pub fn new(indexed: IndexedArena<IExpr>, files: Vec<IFile>) -> Self {
-        let arena = Arena::from_indexed(indexed);
-        Ast {
-            files: files
-                .into_iter()
-                .map(|file| file.into_ref(&arena))
-                .collect(),
-            exprs: arena,
-        }
-    }
-
-    pub fn files(&self) -> &[File<'ast>] {
-        &self.files
-    }
-}
-
 pub struct IFile {
+    exprs: IndexedArena<IExpr>,
     def_ids: BTreeMap<String, usize>,
     defs: Vec<IFnDef>,
 }
 
 impl IFile {
-    pub fn new(defs: Vec<IFnDef>) -> Self {
+    pub fn new(exprs: IndexedArena<IExpr>, defs: Vec<IFnDef>) -> Self {
         Self {
+            exprs,
             def_ids: defs
                 .iter()
                 .enumerate()
@@ -64,25 +25,46 @@ impl IFile {
         }
     }
 
-    fn into_ref<'ast>(self, arena: &Arena<Expr<'ast>>) -> File<'ast> {
+    pub fn into_ref<'ast>(self) -> File<'ast> {
+        let exprs = Arena::from_indexed(self.exprs);
         File {
             def_ids: self.def_ids,
             defs: self
                 .defs
                 .into_iter()
                 // SAFETY:
-                // - The AST is immutable and private after creation so nothing will be dropped until it is dropped
-                //   whole, and its drop impl drops the arena last
-                .map(|def| def.into_ref(unsafe { arena.slice() }))
+                // - The File is immutable and private after creation so nothing will be dropped until it is dropped
+                //   whole, and its drop impl clears all references into the arena
+                .map(|def| def.into_ref(unsafe { exprs.slice() }))
                 .collect(),
+            _exprs: exprs,
         }
     }
 }
 
-#[derive(Clone, Hash, PartialEq)]
 pub struct File<'ast> {
+    _exprs: Arena<Expr<'ast>>,
     def_ids: BTreeMap<String, usize>,
     defs: Vec<FnDef<'ast>>,
+}
+
+impl<'ast> Drop for File<'ast> {
+    fn drop(&mut self) {
+        self.defs.clear();
+    }
+}
+
+impl<'ast> Hash for File<'ast> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.def_ids.hash(state);
+        self.defs.hash(state);
+    }
+}
+
+impl<'ast> PartialEq for File<'ast> {
+    fn eq(&self, other: &Self) -> bool {
+        self.def_ids == other.def_ids && self.defs == other.defs
+    }
 }
 
 #[track]
@@ -96,6 +78,7 @@ impl<'ast> File<'ast> {
     }
 }
 
+#[derive(Clone)]
 pub struct IFnDef {
     name: String,
     body: IStmts,
@@ -131,6 +114,7 @@ impl<'ast> FnDef<'ast> {
     }
 }
 
+#[derive(Clone)]
 pub struct IStmts(Vec<IStmt>);
 
 impl IStmts {
@@ -157,6 +141,7 @@ impl<'ast> Stmts<'ast> {
     }
 }
 
+#[derive(Clone)]
 pub enum IStmt {
     Expr(Id<IExpr>),
 }
@@ -187,6 +172,7 @@ impl ExprId {
     }
 }
 
+#[derive(Clone)]
 pub enum IExpr {
     Let {
         name: String,

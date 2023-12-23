@@ -5,7 +5,7 @@ use comemo::{memoize, Track, Tracked};
 use thiserror::Error;
 
 use crate::arena::IndexedArena;
-use crate::ast::{Ast, Expr, FnDef, Stmt, Stmts};
+use crate::ast::{Expr, FnDef, IFile, Stmt, Stmts};
 use crate::bytecode::{Function, Module, Opcode, OpcodeIndex, Type};
 use crate::error::{Errors, OneOf};
 use crate::nameres::{Scope, ScopeStack};
@@ -49,8 +49,8 @@ pub enum ParseError {
     ExtraToken,
 }
 
-// #[memoize]
-pub fn parse_ast<'ast>(source: String) -> Result<Ast<'ast>, ParseError> {
+#[memoize]
+pub fn parse_ast(source: String) -> Result<IFile, ParseError> {
     let arena = RefCell::new(IndexedArena::new());
     let file = FileParser::new()
         .parse(&arena, &source)
@@ -71,13 +71,13 @@ pub fn parse_ast<'ast>(source: String) -> Result<Ast<'ast>, ParseError> {
             lalrpop_util::ParseError::ExtraToken { .. } => ParseError::ExtraToken,
             _ => unreachable!(),
         })?;
-    Ok(Ast::new(arena.into_inner(), vec![file]))
+    Ok(file)
 }
 
 #[memoize]
 pub fn compute_bytecode(source: String) -> Result<Module, Errors<ParseError>> {
-    let ast = parse_ast(source)?;
-    let funcs = ast.files()[0]
+    let ast = parse_ast(source)?.into_ref();
+    let funcs = ast
         .defs()
         .iter()
         .map(|def| compile_func(def.track()))
