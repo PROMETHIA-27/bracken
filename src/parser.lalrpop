@@ -1,9 +1,9 @@
 use std::str::FromStr;
 
-use crate::arena::{CellArena, Id};
+use crate::arena::{CellArena, CellInterner, Id};
 use crate::ast::{File, FnDef, Expr, Stmt, Stmts};
 
-grammar(exprs: &CellArena<Expr>, strings: &CellArena<String>, stmts: &CellArena<Stmts>);
+grammar(exprs: &CellArena<Expr>, strings: &CellInterner<String>, stmts: &CellArena<Stmts>);
 
 pub File: File = <defs:FnDef*> => File::new(
     exprs.take(), 
@@ -63,6 +63,6 @@ pub Break: Id<Expr> = {
 pub Literal: i32 = <r"[0-9]+"> => i32::from_str(<>).unwrap();
 
 pub Ident: Id<String> = {
-    <r"[a-zA-Z][_a-zA-Z0-9]*"> => strings.push(<>.to_string()),
-    <r"[0-9]+[a-zA-Z][_a-zA-Z0-9]*"> => strings.push(<>.to_string()),
+    <r"[a-zA-Z][_a-zA-Z0-9]*"> => strings.add(<>.to_string()),
+    <r"[0-9]+[a-zA-Z][_a-zA-Z0-9]*"> => strings.add(<>.to_string()),
 }

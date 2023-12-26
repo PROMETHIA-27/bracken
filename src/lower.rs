@@ -2,7 +2,7 @@ use bincode::{DefaultOptions, Options};
 use comemo::{memoize, Track, Tracked};
 use thiserror::Error;
 
-use crate::arena::{CellArena, Id};
+use crate::arena::{CellArena, CellInterner, Id};
 use crate::ast::{Expr, File, FnDef, Stmt, Stmts};
 use crate::bytecode::{Function, Module, Opcode, OpcodeIndex, Type};
 use crate::error::{Errors, OneOf};
@@ -50,7 +50,7 @@ pub enum ParseError {
 #[memoize]
 pub fn parse_ast(source: String) -> Result<File, ParseError> {
     let exprs = CellArena::new();
-    let strings = CellArena::new();
+    let strings = CellInterner::new();
     let stmts = CellArena::new();
     let file = FileParser::new()
         .parse(&exprs, &strings, &stmts, &source)

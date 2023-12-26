@@ -3,14 +3,13 @@ use std::hash::Hash;
 
 use comemo::track;
 
-use crate::arena::{Arena, Id};
+use crate::arena::{Arena, Id, Interner};
 
 #[derive(Clone)]
 pub struct File {
     exprs: Arena<Expr>,
     // TODO: Move this to a higher level
-    // TODO: Make this a proper interner, not an arena
-    strings: Arena<String>,
+    strings: Interner<String>,
     stmts: Arena<Stmts>,
     def_ids: BTreeMap<Id<String>, usize>,
     defs: Vec<FnDef>,
@@ -38,7 +37,7 @@ impl PartialEq for File {
 impl File {
     pub fn new(
         exprs: Arena<Expr>,
-        strings: Arena<String>,
+        strings: Interner<String>,
         stmts: Arena<Stmts>,
         defs: Vec<FnDef>,
     ) -> Self {

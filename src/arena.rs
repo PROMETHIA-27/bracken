@@ -1,4 +1,6 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
 
@@ -190,6 +192,69 @@ impl<T> Arena<T> {
 }
 
 impl<T> Default for Arena<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Interner<T: Clone + Hash + Eq> {
+    items: Vec<T>,
+    lookup: HashMap<T, usize>,
+}
+
+impl<T: Clone + Hash + Eq> Interner<T> {
+    pub fn new() -> Self {
+        Interner {
+            items: vec![],
+            lookup: HashMap::new(),
+        }
+    }
+
+    pub fn add(&mut self, value: T) -> Id<T> {
+        match self.lookup.get(&value) {
+            Some(index) => Id::new(*index),
+            None => {
+                let index = self.items.len();
+                self.items.push(value.clone());
+                self.lookup.insert(value, index);
+                Id::new(index)
+            }
+        }
+    }
+
+    pub fn get(&self, id: Id<T>) -> &T {
+        self.items.get(id.index()).expect("interner/id mismatch")
+    }
+}
+
+impl<T: Clone + Hash + Eq> Default for Interner<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct CellInterner<T: Clone + Hash + Eq> {
+    interner: RefCell<Interner<T>>,
+}
+
+impl<T: Clone + Hash + Eq> CellInterner<T> {
+    pub fn new() -> Self {
+        Self {
+            interner: RefCell::new(Interner::new()),
+        }
+    }
+
+    pub fn add(&self, value: T) -> Id<T> {
+        self.interner.borrow_mut().add(value)
+    }
+
+    pub fn take(&self) -> Interner<T> {
+        self.interner.take()
+    }
+}
+
+impl<T: Clone + Hash + Eq> Default for CellInterner<T> {
     fn default() -> Self {
         Self::new()
     }
