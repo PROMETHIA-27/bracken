@@ -1,42 +1,134 @@
+use std::cell::RefCell;
 use std::marker::PhantomData;
+use std::num::NonZeroU32;
 
-pub trait IntoArena<'arena>: Sized {
-    type Indexed;
+pub struct Id<T>(NonZeroU32, PhantomData<fn() -> T>);
 
-    fn to_ref(indexed: Self::Indexed, children: &'arena [Self]) -> Self;
+impl<T> Clone for Id<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
-#[derive(Clone, Copy, Debug, Hash, PartialEq)]
-pub struct Id<T>(u32, PhantomData<fn() -> T>);
+impl<T> Copy for Id<T> {}
+
+impl<T> std::fmt::Debug for Id<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Id").field(&self.0).finish()
+    }
+}
+
+impl<T> std::hash::Hash for Id<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl<T> PartialEq for Id<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl<T> Eq for Id<T> {}
+
+impl<T> PartialOrd for Id<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<T> Ord for Id<T> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.cmp(&other.0)
+    }
+}
 
 impl<T> Id<T> {
     fn new(index: usize) -> Self {
-        Self(index.try_into().unwrap(), PhantomData)
+        let index: u32 = index.try_into().unwrap();
+        let index = match index.checked_add(1) {
+            Some(i) => i,
+            None => panic!("too many Ids allocated"),
+        };
+        Self(NonZeroU32::new(index).unwrap(), PhantomData)
     }
 
     pub fn index(&self) -> usize {
-        self.0.try_into().unwrap()
-    }
-
-    pub fn to_ref<'ast, U: IntoArena<'ast, Indexed = T>>(self) -> Id<U> {
-        Id::new(self.index())
+        <u32 as TryInto<usize>>::try_into(self.0.get()).unwrap() - 1
     }
 }
 
 #[derive(Clone)]
-pub struct IndexedArena<T> {
+pub struct CellArena<T> {
+    vec: RefCell<Arena<T>>,
+}
+
+impl<T> CellArena<T> {
+    pub fn new() -> Self {
+        Self {
+            vec: RefCell::new(Arena::new()),
+        }
+    }
+
+    pub fn push(&self, val: T) -> Id<T> {
+        self.vec.borrow_mut().push(val)
+    }
+
+    pub fn len(&self) -> usize {
+        self.vec.borrow().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn into_inner(self) -> Arena<T> {
+        self.vec.into_inner()
+    }
+
+    pub fn take(&self) -> Arena<T> {
+        self.vec.take()
+    }
+}
+
+impl<T> Default for CellArena<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone)]
+pub struct Arena<T> {
+    // blocks: Vec<(usize, Box<[MaybeUninit<T>]>)>,
     vec: Vec<T>,
 }
 
-impl<T> IndexedArena<T> {
+impl<T> Arena<T> {
+    // TODO: Mess around with block size once a good benchmark(s) is available
+    // const BLOCK_SIZE: usize = 128;
+
     pub fn new() -> Self {
-        Self { vec: vec![] }
+        Self {
+            // blocks: vec![Self::new_block()],
+            vec: vec![],
+        }
     }
 
-    pub fn push(&mut self, val: T) -> Id<T> {
-        self.vec.push(val);
-        Id::new(self.vec.len() - 1)
-    }
+    // fn new_block() -> (usize, Box<[MaybeUninit<T>]>) {
+    //     (
+    //         0,
+    //         std::iter::repeat(MaybeUninit::uninit())
+    //             .take(Self::BLOCK_SIZE)
+    //             .collect(),
+    //     )
+    // }
+
+    // pub fn len(&self) -> usize {
+    //     let filled_count = (self.blocks.len() - 1) * Self::BLOCK_SIZE;
+    //     let last_count = self.blocks.last().unwrap().0;
+    //     filled_count + last_count
+    // }
 
     pub fn len(&self) -> usize {
         self.vec.len()
@@ -45,50 +137,78 @@ impl<T> IndexedArena<T> {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// # Safety:
+    /// - If `value` contains references into this arena, they must be to previous elements in the arena
+    ///   (they must have been inserted before this one)
+    pub fn push(&mut self, value: T) -> Id<T> {
+        // let (index, block) = self.get_open_block_mut();
+        // block[*index] = MaybeUninit::new(value);
+        // let id = Id::new(*index);
+        // *index += 1;
+        // id
+        self.vec.push(value);
+        self.last()
+    }
+
+    // fn get_open_block_mut(&mut self) -> &mut (usize, Box<[MaybeUninit<T>]>) {
+    //     let block = self.blocks.last_mut().unwrap();
+
+    //     if block.0 == Self::BLOCK_SIZE {
+    //         self.blocks.push(Self::new_block());
+    //     }
+
+    //     self.blocks.last_mut().unwrap()
+    // }
+
+    // // # Safety:
+    // // - This element cannot be given any references to elements inserted after it
+    // pub fn get(&self, id: Id<T>) -> Option<&T> {
+    //     let index = id.index();
+    //     let block_index = index / Self::BLOCK_SIZE;
+    //     let index = index % Self::BLOCK_SIZE;
+
+    //     let block = self.blocks.get(block_index)?;
+    //     if index >= block.0 {
+    //         return None;
+    //     }
+
+    //     let value = &block.1[index];
+    //     // SAFETY:
+    //     // - All values with index < length of the block are init and always will be
+    //     let value = unsafe { value.assume_init_ref() };
+    //     Some(value)
+    // }
+
+    pub fn get(&self, id: Id<T>) -> &T {
+        self.vec.get(id.index()).expect("arena/id mismatch")
+    }
+
+    pub fn last(&self) -> Id<T> {
+        Id::new(self.vec.len() - 1)
+    }
 }
 
-impl<T> Default for IndexedArena<T> {
+impl<T> Default for Arena<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-pub struct Arena<T> {
-    vec: Vec<T>,
-}
+#[cfg(test)]
+mod tests {
+    use super::Arena;
 
-impl<'ast, T: IntoArena<'ast> + 'ast> Arena<T> {
-    pub fn from_indexed(indexed: IndexedArena<T::Indexed>) -> Self {
-        let mut vec = Vec::with_capacity(indexed.len());
-        for indexed in indexed.vec {
-            // SAFETY:
-            // - Lifetime transmute, so the types are fully compatible
-            // - The lifetime is bound to 'ast, so it cannot outlive the arena
-            // - Elements cannot be removed and the vec cannot be resized, so references will not
-            //   be invalidated
-            let children = unsafe { std::mem::transmute::<&[T], &'ast [T]>(&vec[..]) };
-            let value = T::to_ref(indexed, children);
-            vec.push(value);
+    #[allow(clippy::assertions_on_constants)]
+    #[test]
+    fn arena_len() {
+        let mut arena = Arena::new();
+        for i in 0..257 {
+            arena.push(i);
         }
-        Self { vec }
-    }
 
-    pub fn get(&self, id: Id<T>) -> &T {
-        &self.vec[id.index()]
-    }
-
-    /// Get a reference to the contents of the arena with an extended lifetime.
-    /// # Safety:
-    /// - This slice and any references derived from it must be dropped before this arena is dropped.
-    pub unsafe fn slice(&self) -> &'ast [T] {
-        unsafe { std::mem::transmute::<&[T], &'ast [T]>(&self.vec) }
-    }
-}
-
-impl<T> Drop for Arena<T> {
-    fn drop(&mut self) {
-        for elem in std::mem::take(&mut self.vec).into_iter().rev() {
-            drop(elem);
-        }
+        // make sure length exceeds block size to test multiple blocks
+        // assert!(257 > Arena::<i32>::BLOCK_SIZE);
+        assert_eq!(arena.len(), 257);
     }
 }

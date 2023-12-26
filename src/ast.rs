@@ -3,74 +3,75 @@ use std::hash::Hash;
 
 use comemo::track;
 
-use crate::arena::{Arena, Id, IndexedArena, IntoArena};
+use crate::arena::{Arena, Id};
 
 #[derive(Clone)]
-pub struct IFile {
-    exprs: IndexedArena<IExpr>,
-    def_ids: BTreeMap<String, usize>,
-    defs: Vec<IFnDef>,
+pub struct File {
+    exprs: Arena<Expr>,
+    // TODO: Move this to a higher level
+    // TODO: Make this a proper interner, not an arena
+    strings: Arena<String>,
+    stmts: Arena<Stmts>,
+    def_ids: BTreeMap<Id<String>, usize>,
+    defs: Vec<FnDef>,
 }
 
-impl IFile {
-    pub fn new(exprs: IndexedArena<IExpr>, defs: Vec<IFnDef>) -> Self {
-        Self {
-            exprs,
-            def_ids: defs
-                .iter()
-                .enumerate()
-                .map(|(i, def)| (def.name.clone(), i))
-                .collect(),
-            defs,
-        }
-    }
-
-    pub fn into_ref<'ast>(self) -> File<'ast> {
-        let exprs = Arena::from_indexed(self.exprs);
-        File {
-            def_ids: self.def_ids,
-            defs: self
-                .defs
-                .into_iter()
-                // SAFETY:
-                // - The File is immutable and private after creation so nothing will be dropped until it is dropped
-                //   whole, and its drop impl clears all references into the arena
-                .map(|def| def.into_ref(unsafe { exprs.slice() }))
-                .collect(),
-            _exprs: exprs,
-        }
-    }
-}
-
-pub struct File<'ast> {
-    _exprs: Arena<Expr<'ast>>,
-    def_ids: BTreeMap<String, usize>,
-    defs: Vec<FnDef<'ast>>,
-}
-
-impl<'ast> Drop for File<'ast> {
+impl Drop for File {
     fn drop(&mut self) {
         self.defs.clear();
     }
 }
 
-impl<'ast> Hash for File<'ast> {
+impl Hash for File {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.def_ids.hash(state);
         self.defs.hash(state);
     }
 }
 
-impl<'ast> PartialEq for File<'ast> {
+impl PartialEq for File {
     fn eq(&self, other: &Self) -> bool {
         self.def_ids == other.def_ids && self.defs == other.defs
     }
 }
 
+impl File {
+    pub fn new(
+        exprs: Arena<Expr>,
+        strings: Arena<String>,
+        stmts: Arena<Stmts>,
+        defs: Vec<FnDef>,
+    ) -> Self {
+        Self {
+            def_ids: defs
+                .iter()
+                .enumerate()
+                .map(|(i, def)| (def.name(), i))
+                .collect(),
+            exprs,
+            strings,
+            stmts,
+            defs,
+        }
+    }
+}
+
 #[track]
-impl<'ast> File<'ast> {
-    pub fn def(&self, name: &str) -> &FnDef {
-        &self.defs[self.def_ids[name]]
+impl File {
+    pub fn expr(&self, expr: Id<Expr>) -> Expr {
+        *self.exprs.get(expr)
+    }
+
+    pub fn str(&self, string: Id<String>) -> &str {
+        self.strings.get(string)
+    }
+
+    pub fn stmts(&self, stmts: Id<Stmts>) -> &Stmts {
+        self.stmts.get(stmts)
+    }
+
+    pub fn def(&self, name: Id<String>) -> &FnDef {
+        &self.defs[self.def_ids[&name]]
     }
 
     pub fn defs(&self) -> &[FnDef] {
@@ -78,85 +79,48 @@ impl<'ast> File<'ast> {
     }
 }
 
-#[derive(Clone)]
-pub struct IFnDef {
-    name: String,
-    body: IStmts,
-}
-
-impl IFnDef {
-    pub fn new(name: String, body: IStmts) -> Self {
-        IFnDef { name, body }
-    }
-
-    fn into_ref<'ast>(self, children: &'ast [Expr<'ast>]) -> FnDef<'ast> {
-        FnDef {
-            name: self.name,
-            body: self.body.into_ref(children),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Hash, PartialEq)]
-pub struct FnDef<'ast> {
-    name: String,
-    body: Stmts<'ast>,
+pub struct FnDef {
+    name: Id<String>,
+    body: Id<Stmts>,
+}
+
+impl FnDef {
+    pub fn new(name: Id<String>, body: Id<Stmts>) -> Self {
+        FnDef { name, body }
+    }
 }
 
 #[track]
-impl<'ast> FnDef<'ast> {
-    pub fn name(&self) -> &str {
-        &self.name
+impl FnDef {
+    pub fn name(&self) -> Id<String> {
+        self.name
     }
 
-    pub fn body(&self) -> &Stmts {
-        &self.body
-    }
-}
-
-#[derive(Clone)]
-pub struct IStmts(Vec<IStmt>);
-
-impl IStmts {
-    pub fn new(stmts: Vec<IStmt>) -> Self {
-        Self(stmts)
-    }
-
-    fn into_ref<'ast>(self, children: &'ast [Expr]) -> Stmts<'ast> {
-        Stmts(
-            self.0
-                .into_iter()
-                .map(|stmt| stmt.into_ref(children))
-                .collect(),
-        )
+    pub fn body(&self) -> Id<Stmts> {
+        self.body
     }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq)]
-pub struct Stmts<'ast>(Vec<Stmt<'ast>>);
+pub struct Stmts(Vec<Stmt>);
 
-impl<'ast> Stmts<'ast> {
-    pub fn stmts(&self) -> &[Stmt<'ast>] {
+impl Stmts {
+    pub fn new(stmts: Vec<Stmt>) -> Stmts {
+        Stmts(stmts)
+    }
+}
+
+#[track]
+impl Stmts {
+    pub fn stmts(&self) -> &[Stmt] {
         &self.0
     }
 }
 
-#[derive(Clone)]
-pub enum IStmt {
-    Expr(Id<IExpr>),
-}
-
-impl IStmt {
-    fn into_ref<'ast>(self, children: &'ast [Expr]) -> Stmt<'ast> {
-        match self {
-            IStmt::Expr(exp) => Stmt::Expr(&children[exp.index()]),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Hash, PartialEq)]
-pub enum Stmt<'ast> {
-    Expr(&'ast Expr<'ast>),
+#[derive(Clone, Copy, Debug, Hash, PartialEq)]
+pub enum Stmt {
+    Expr(Id<Expr>),
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq)]
@@ -172,79 +136,26 @@ impl ExprId {
     }
 }
 
-#[derive(Clone)]
-pub enum IExpr {
+#[derive(Clone, Copy, Debug, Hash, PartialEq)]
+pub enum Expr {
     Let {
-        name: String,
-        ty: Option<String>,
-        value: Id<IExpr>,
+        name: Id<String>,
+        ty: Option<Id<String>>,
+        value: Id<Expr>,
     },
     Set {
-        name: String,
-        value: Id<IExpr>,
+        name: Id<String>,
+        value: Id<Expr>,
     },
-    Local(String),
+    Local(Id<String>),
     Literal(i32),
-    Plus(Id<IExpr>, Id<IExpr>),
-    Minus(Id<IExpr>, Id<IExpr>),
-    Times(Id<IExpr>, Id<IExpr>),
+    Plus(Id<Expr>, Id<Expr>),
+    Minus(Id<Expr>, Id<Expr>),
+    Times(Id<Expr>, Id<Expr>),
     While {
-        pred: Id<IExpr>,
-        body: IStmts,
+        pred: Id<Expr>,
+        body: Id<Stmts>,
     },
-    Break(Option<Id<IExpr>>),
-    Return(Option<Id<IExpr>>),
-}
-
-#[derive(Clone, Debug, Hash, PartialEq)]
-pub enum Expr<'ast> {
-    Let {
-        name: String,
-        ty: Option<String>,
-        value: &'ast Expr<'ast>,
-    },
-    Set {
-        name: String,
-        value: &'ast Expr<'ast>,
-    },
-    Local(String),
-    Literal(i32),
-    Plus(&'ast Expr<'ast>, &'ast Expr<'ast>),
-    Minus(&'ast Expr<'ast>, &'ast Expr<'ast>),
-    Times(&'ast Expr<'ast>, &'ast Expr<'ast>),
-    While {
-        pred: &'ast Expr<'ast>,
-        body: Stmts<'ast>,
-    },
-    Break(Option<&'ast Expr<'ast>>),
-    Return(Option<&'ast Expr<'ast>>),
-}
-
-impl<'ast> IntoArena<'ast> for Expr<'ast> {
-    type Indexed = IExpr;
-
-    fn to_ref(indexed: Self::Indexed, children: &'ast [Self]) -> Self {
-        match indexed {
-            IExpr::Let { name, ty, value } => Expr::Let {
-                name,
-                ty,
-                value: &children[value.index()],
-            },
-            IExpr::Set { name, value } => Expr::Set {
-                name,
-                value: &children[value.index()],
-            },
-            IExpr::Local(loc) => Expr::Local(loc),
-            IExpr::Literal(lit) => Expr::Literal(lit),
-            IExpr::Plus(l, r) => Expr::Plus(&children[l.index()], &children[r.index()]),
-            IExpr::Minus(l, r) => Expr::Minus(&children[l.index()], &children[r.index()]),
-            IExpr::Times(l, r) => Expr::Times(&children[l.index()], &children[r.index()]),
-            IExpr::While { pred, body } => Expr::While {
-                pred: &children[pred.index()],
-                body: body.into_ref(children),
-            },
-            IExpr::Break(value) => Expr::Break(value.map(|v| &children[v.index()])),
-            IExpr::Return(value) => Expr::Return(value.map(|v| &children[v.index()])),
-        }
-    }
+    Break(Option<Id<Expr>>),
+    Return(Option<Id<Expr>>),
 }
