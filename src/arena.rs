@@ -233,6 +233,14 @@ impl<T, E> ExtendArena<T, E> {
             _marker: PhantomData,
         }
     }
+
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 impl<T, E: Default> ExtendArena<T, E> {
@@ -253,6 +261,35 @@ impl<T, E: Default> ExtendArena<T, E> {
 }
 
 impl<T, E> Default for ExtendArena<T, E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Clone)]
+pub struct CellExtendArena<T, E> {
+    arena: RefCell<ExtendArena<T, E>>,
+}
+
+impl<T, E> CellExtendArena<T, E> {
+    pub fn new() -> Self {
+        Self {
+            arena: RefCell::new(ExtendArena::new()),
+        }
+    }
+
+    pub fn take(&self) -> ExtendArena<T, E> {
+        self.arena.take()
+    }
+}
+
+impl<T, E: Default> CellExtendArena<T, E> {
+    pub fn set(&self, id: Id<T>, val: E) {
+        self.arena.borrow_mut().set(id, val)
+    }
+}
+
+impl<T, E> Default for CellExtendArena<T, E> {
     fn default() -> Self {
         Self::new()
     }

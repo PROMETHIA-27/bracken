@@ -54,7 +54,9 @@ fn resolve_func<'f>(
     stack: &mut ScopeStack<'f>,
     resolved: &mut Resolved,
 ) {
+    stack.push(Scope::function());
     resolve_stmts(file, file.stmts(def.body()), stack, resolved);
+    stack.pop();
 }
 
 fn resolve_stmts<'f>(

@@ -1,12 +1,21 @@
 use std::str::FromStr;
+use std::sync::Arc;
 
-use crate::arena::{CellArena, CellInterner, Id};
+use crate::arena::{CellArena, CellExtendArena, CellInterner, Id};
 use crate::ast::{File, FnDef, Expr, Stmt, Stmts};
 
-grammar(exprs: &CellArena<Expr>, strings: &CellInterner<String>, stmts: &CellArena<Stmts>);
+grammar(
+    source: &Arc<String>,
+    exprs: &CellArena<Expr>, 
+    strings: &CellInterner<String>, 
+    stmts: &CellArena<Stmts>, 
+    spans: &CellExtendArena<Expr, (usize, usize)>
+);
 
 pub File: File = <defs:FnDef*> => File::new(
+    source.clone(),
     exprs.take(), 
+    spans.take(),
     strings.take(), 
     stmts.take(), 
     defs
@@ -21,7 +30,7 @@ pub Stmt: Stmt = {
     <Expr> => Stmt::Expr(<>),
 }
 
-pub Expr: Id<Expr> = AssignExpr;
+pub Expr: Id<Expr> = Spanned<AssignExpr>;
 
 pub AssignExpr: Id<Expr> = {
     "let" <name:Ident> <ty:(":" <Ident>)?> "=" <value:AssignExpr> => 
@@ -65,4 +74,11 @@ pub Literal: i32 = <r"[0-9]+"> => i32::from_str(<>).unwrap();
 pub Ident: Id<String> = {
     <r"[a-zA-Z][_a-zA-Z0-9]*"> => strings.add(<>.to_string()),
     <r"[0-9]+[a-zA-Z][_a-zA-Z0-9]*"> => strings.add(<>.to_string()),
+}
+
+Spanned<T>: T = {
+    <l:@L> <t:T> <r:@R> => {
+        spans.set(t, (l, r));
+        t
+    }
 }

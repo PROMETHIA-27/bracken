@@ -116,9 +116,7 @@ pub fn check_types(file: &File, resolved: &Resolved) -> Result<SolvedTypes, Erro
             Expr::Return(val) => {
                 solved.set(expr, Some(Type::Void));
                 // TODO: Read from function ret ty
-                if let Some(val) = val {
-                    
-                }
+                if let Some(val) = val {}
             }
         }
     }
@@ -151,6 +149,7 @@ pub fn check_types(file: &File, resolved: &Resolved) -> Result<SolvedTypes, Erro
                     if i == constraints.len() {
                         if changed {
                             i = 0;
+                            changed = false;
                         } else {
                             exit = true;
                         }

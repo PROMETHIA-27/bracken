@@ -1,16 +1,21 @@
 use std::collections::BTreeMap;
 use std::hash::Hash;
+use std::sync::Arc;
 
-use crate::arena::{Arena, Id, Interner};
+use crate::arena::{Arena, ExtendArena, Id, Interner};
 
 #[derive(Clone)]
 pub struct File {
+    source: Arc<String>,
+    lines: Vec<usize>,
     exprs: Arena<Expr>,
+    spans: ExtendArena<Expr, (usize, usize)>,
     // TODO: Move this to a higher level
     strings: Interner<String>,
     stmts: Arena<Stmts>,
     def_ids: BTreeMap<Id<String>, usize>,
     defs: Vec<FnDef>,
+    // TODO: RIGHT NOW: add span info so I can return good errors
 }
 
 impl Drop for File {
@@ -34,18 +39,27 @@ impl PartialEq for File {
 
 impl File {
     pub fn new(
+        source: Arc<String>,
         exprs: Arena<Expr>,
+        spans: ExtendArena<Expr, (usize, usize)>,
         strings: Interner<String>,
         stmts: Arena<Stmts>,
         defs: Vec<FnDef>,
     ) -> Self {
         Self {
+            lines: source
+                .chars()
+                .enumerate()
+                .filter_map(|(i, c)| (c == '\n').then_some(i))
+                .collect(),
+            source,
             def_ids: defs
                 .iter()
                 .enumerate()
                 .map(|(i, def)| (def.name(), i))
                 .collect(),
             exprs,
+            spans,
             strings,
             stmts,
             defs,
@@ -58,6 +72,10 @@ impl File {
 
     pub fn expr(&self, expr: Id<Expr>) -> Expr {
         *self.exprs.get(expr)
+    }
+
+    pub fn spans(&self) -> &ExtendArena<Expr, (usize, usize)> {
+        &self.spans
     }
 
     pub fn str(&self, string: Id<String>) -> &str {

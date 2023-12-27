@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use bincode::{DefaultOptions, Options};
 use thiserror::Error;
 
-use crate::arena::{CellArena, CellInterner, Id};
+use crate::arena::{CellArena, CellExtendArena, CellInterner, Id};
 use crate::ast::{Expr, File, FnDef, Stmt, Stmts};
 use crate::bytecode::{Function, LabelIndex, Module, Opcode, OpcodeIndex, Type};
 use crate::error::{Errors, OneOf};
@@ -47,11 +49,13 @@ pub enum ParseError {
 }
 
 pub fn parse_ast(source: String) -> Result<File, ParseError> {
+    let source = Arc::new(source);
     let exprs = CellArena::new();
+    let spans = CellExtendArena::new();
     let strings = CellInterner::new();
     let stmts = CellArena::new();
     let file = FileParser::new()
-        .parse(&exprs, &strings, &stmts, &source)
+        .parse(&source, &exprs, &strings, &stmts, &spans, &source)
         .map_err(|err| match err {
             lalrpop_util::ParseError::InvalidToken { location } => {
                 ParseError::InvalidToken(location)
