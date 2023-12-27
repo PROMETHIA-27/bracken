@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 use std::hash::Hash;
 
-use comemo::track;
-
 use crate::arena::{Arena, Id, Interner};
 
 #[derive(Clone)]
@@ -53,10 +51,11 @@ impl File {
             defs,
         }
     }
-}
 
-#[track]
-impl File {
+    pub fn exprs(&self) -> &Arena<Expr> {
+        &self.exprs
+    }
+
     pub fn expr(&self, expr: Id<Expr>) -> Expr {
         *self.exprs.get(expr)
     }
@@ -88,10 +87,7 @@ impl FnDef {
     pub fn new(name: Id<String>, body: Id<Stmts>) -> Self {
         FnDef { name, body }
     }
-}
 
-#[track]
-impl FnDef {
     pub fn name(&self) -> Id<String> {
         self.name
     }
@@ -108,10 +104,7 @@ impl Stmts {
     pub fn new(stmts: Vec<Stmt>) -> Stmts {
         Stmts(stmts)
     }
-}
 
-#[track]
-impl Stmts {
     pub fn stmts(&self) -> &[Stmt] {
         &self.0
     }

@@ -189,9 +189,70 @@ impl<T> Arena<T> {
     pub fn last(&self) -> Id<T> {
         Id::new(self.vec.len() - 1)
     }
+
+    pub fn ids(&self) -> impl Iterator<Item = Id<T>> {
+        (0..self.len()).map(Id::new)
+    }
 }
 
 impl<T> Default for Arena<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct ExtendArena<T, E> {
+    items: Vec<E>,
+    _marker: PhantomData<fn() -> T>,
+}
+
+impl<T, E: Clone> Clone for ExtendArena<T, E> {
+    fn clone(&self) -> Self {
+        Self {
+            items: self.items.clone(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T, E> ExtendArena<T, E> {
+    pub fn new() -> Self {
+        Self {
+            items: vec![],
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn get_no_resize(&self, id: Id<T>) -> Option<&E> {
+        self.items.get(id.index())
+    }
+
+    pub fn map<R>(self, mapping: impl Fn(E) -> R) -> ExtendArena<T, R> {
+        ExtendArena {
+            items: self.items.into_iter().map(mapping).collect(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<T, E: Default> ExtendArena<T, E> {
+    pub fn get(&mut self, id: Id<T>) -> &E {
+        self.items.resize_with(id.index() + 1, E::default);
+        &self.items[id.index()]
+    }
+
+    pub fn get_mut(&mut self, id: Id<T>) -> &mut E {
+        self.items.resize_with(id.index() + 1, E::default);
+        &mut self.items[id.index()]
+    }
+
+    pub fn set(&mut self, id: Id<T>, value: E) {
+        self.items.resize_with(id.index() + 1, E::default);
+        self.items[id.index()] = value;
+    }
+}
+
+impl<T, E> Default for ExtendArena<T, E> {
     fn default() -> Self {
         Self::new()
     }

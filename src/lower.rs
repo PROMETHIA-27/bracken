@@ -1,13 +1,13 @@
 use bincode::{DefaultOptions, Options};
-use comemo::{memoize, Track, Tracked};
 use thiserror::Error;
 
 use crate::arena::{CellArena, CellInterner, Id};
 use crate::ast::{Expr, File, FnDef, Stmt, Stmts};
-use crate::bytecode::{Function, Module, Opcode, OpcodeIndex, Type};
+use crate::bytecode::{Function, LabelIndex, Module, Opcode, OpcodeIndex, Type};
 use crate::error::{Errors, OneOf};
-use crate::nameres::{Scope, ScopeStack};
+use crate::nameres::{self, Resolved};
 use crate::parser::FileParser;
+use crate::typecheck::{self, SolvedTypes};
 
 #[derive(Clone, Debug, Error)]
 pub enum Error {
@@ -23,9 +23,8 @@ pub enum SerError {
     Failed,
 }
 
-#[memoize]
 pub fn compile(source: String) -> Result<Vec<u8>, Errors<Error>> {
-    let module = compute_bytecode(source)
+    let module = compile_bytecode(source)
         .map_err(|errs| errs.into_iter().map(Error::from).collect::<Vec<_>>())?;
     Ok(DefaultOptions::new()
         .with_varint_encoding()
@@ -47,7 +46,6 @@ pub enum ParseError {
     ExtraToken,
 }
 
-#[memoize]
 pub fn parse_ast(source: String) -> Result<File, ParseError> {
     let exprs = CellArena::new();
     let strings = CellInterner::new();
@@ -74,88 +72,148 @@ pub fn parse_ast(source: String) -> Result<File, ParseError> {
     Ok(file)
 }
 
-#[memoize]
-pub fn compute_bytecode(source: String) -> Result<Module, Errors<ParseError>> {
+pub fn compile_bytecode(source: String) -> Result<Module, Errors<ParseError>> {
     let file = parse_ast(source)?;
-    let funcs = file
-        .defs()
-        .iter()
-        .map(|def| compile_func(&file, def.track()))
-        .collect::<Vec<Function>>();
+    let resolved = nameres::resolve_names(&file);
+    // TODO: Handle these errors (make a new error type for this function)
+    let solved = typecheck::check_types(&file, &resolved).unwrap();
+    let funcs = compile_file(&file, &resolved, &solved);
     Ok(Module { funcs })
 }
 
-#[memoize]
-pub fn compile_func(file: &File, def: Tracked<FnDef>) -> Function {
+struct LabelScopeStack {
+    vec: Vec<LabelScope>,
+}
+
+impl LabelScopeStack {
+    fn new() -> Self {
+        Self { vec: vec![] }
+    }
+
+    fn push(&mut self, scope: LabelScope) {
+        self.vec.push(scope);
+    }
+
+    fn pop(&mut self) {
+        self.vec.pop().unwrap();
+    }
+
+    fn top(&self) -> LabelScope {
+        *self.vec.last().unwrap()
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LabelScope {
+    end: LabelIndex,
+}
+
+impl LabelScope {
+    fn new(end: LabelIndex) -> Self {
+        LabelScope { end }
+    }
+
+    fn top_level() -> Self {
+        LabelScope {
+            end: LabelIndex::new(0),
+        }
+    }
+}
+
+pub fn compile_file(file: &File, resolved: &Resolved, solved: &SolvedTypes) -> Vec<Function> {
+    let mut stack = LabelScopeStack::new();
+    stack.push(LabelScope::top_level());
+
+    file.defs()
+        .iter()
+        .map(|def| compile_func(file, resolved, solved, def, &mut stack))
+        .collect::<Vec<Function>>()
+}
+
+fn compile_func(
+    file: &File,
+    resolved: &Resolved,
+    solved: &SolvedTypes,
+    def: &FnDef,
+    stack: &mut LabelScopeStack,
+) -> Function {
     let mut func = Function {
         name: file.str(def.name()).to_string(),
         opcodes: vec![],
         labels: vec![OpcodeIndex::UNSET],
         label_pool: vec![],
-        locals: vec![],
+        locals: vec![Type::Void; resolved.local_len()],
     };
-    let mut stack = ScopeStack::new();
-    stack.push(Scope::top_level_scope());
 
-    compile_stmts(file, file.stmts(def.body()), &mut func, &mut stack);
+    compile_stmts(
+        file,
+        resolved,
+        solved,
+        file.stmts(def.body()),
+        &mut func,
+        stack,
+    );
 
     func.labels[0] = OpcodeIndex::new(func.opcodes.len());
     func
 }
 
-pub fn compile_stmts<'f>(
-    file: &'f File,
-    stmts: &'f Stmts,
+fn compile_stmts(
+    file: &File,
+    resolved: &Resolved,
+    solved: &SolvedTypes,
+    stmts: &Stmts,
     func: &mut Function,
-    scopes: &mut ScopeStack<'f>,
+    scopes: &mut LabelScopeStack,
 ) {
     for stmt in stmts.stmts().iter().copied() {
         match stmt {
-            Stmt::Expr(expr) => compile_expr(file, expr, func, scopes),
+            Stmt::Expr(expr) => compile_expr(file, resolved, solved, expr, func, scopes),
         }
     }
 }
 
-pub fn compile_expr<'f>(
-    file: &'f File,
+fn compile_expr(
+    file: &File,
+    resolved: &Resolved,
+    solved: &SolvedTypes,
     expr: Id<Expr>,
     func: &mut Function,
-    scopes: &mut ScopeStack<'f>,
+    scopes: &mut LabelScopeStack,
 ) {
     match file.expr(expr) {
-        Expr::Let { name, value, .. } => {
-            compile_expr(file, value, func, scopes);
-            let local = func.locals.len().try_into().unwrap();
-            scopes.add_local(file.str(name), local);
-            func.locals
-                .push(type_of_expr(file, file.expr(value), func, scopes.top()));
+        Expr::Let { value, .. } => {
+            compile_expr(file, resolved, solved, value, func, scopes);
+            let local = resolved.local(expr);
+            let ty = solved.get(value);
+            func.locals[usize::try_from(local).unwrap()] = ty;
             func.push_op(Opcode::StoreLocal(local));
         }
-        Expr::Set { name, value } => {
-            compile_expr(file, value, func, scopes);
-            let local = scopes.local(file.str(name)).unwrap();
+        Expr::Set { value, .. } => {
+            compile_expr(file, resolved, solved, value, func, scopes);
+            let local = resolved.local(expr);
             func.push_op(Opcode::StoreLocal(local));
         }
-        Expr::Local(name) => {
-            let local = scopes.local(file.str(name)).expect("unbound name");
+        Expr::Local(_) => {
+            let local = resolved.local(expr);
             func.push_op(Opcode::LoadLocal(local));
         }
         Expr::Literal(constant) => {
             func.push_op(Opcode::LiteralS4(constant));
         }
         Expr::Plus(lhs, rhs) => {
-            compile_expr(file, lhs, func, scopes);
-            compile_expr(file, rhs, func, scopes);
+            compile_expr(file, resolved, solved, lhs, func, scopes);
+            compile_expr(file, resolved, solved, rhs, func, scopes);
             func.push_op(Opcode::Add);
         }
         Expr::Minus(lhs, rhs) => {
-            compile_expr(file, lhs, func, scopes);
-            compile_expr(file, rhs, func, scopes);
+            compile_expr(file, resolved, solved, lhs, func, scopes);
+            compile_expr(file, resolved, solved, rhs, func, scopes);
             func.push_op(Opcode::Sub);
         }
         Expr::Times(lhs, rhs) => {
-            compile_expr(file, lhs, func, scopes);
-            compile_expr(file, rhs, func, scopes);
+            compile_expr(file, resolved, solved, lhs, func, scopes);
+            compile_expr(file, resolved, solved, rhs, func, scopes);
             func.push_op(Opcode::Mult);
         }
         Expr::While { pred, body } => {
@@ -166,7 +224,7 @@ pub fn compile_expr<'f>(
 
             func.set_label(before_loop, OpcodeIndex::new(func.ops().len()));
 
-            compile_expr(file, pred, func, scopes);
+            compile_expr(file, resolved, solved, pred, func, scopes);
             func.push_op(Opcode::Branch {
                 default: fallthrough,
                 targets,
@@ -174,8 +232,8 @@ pub fn compile_expr<'f>(
 
             func.set_label(fallthrough, OpcodeIndex::new(func.ops().len()));
 
-            scopes.push(Scope::new(after_loop));
-            compile_stmts(file, file.stmts(body), func, scopes);
+            scopes.push(LabelScope::new(after_loop));
+            compile_stmts(file, resolved, solved, file.stmts(body), func, scopes);
             func.push_op(Opcode::Jump(before_loop));
 
             scopes.pop();
@@ -185,39 +243,16 @@ pub fn compile_expr<'f>(
             // TODO: Non-empty breaks
             _ = val;
             // TODO: Good error on break without scope
-            let label = scopes.top().end();
+            // TODO: Actually break from a loop and not whatever
+            let label = scopes.top().end;
             func.push_op(Opcode::Jump(label));
         }
         Expr::Return(val) => {
             // TODO: Empty returns
             let val = val.unwrap();
-            compile_expr(file, val, func, scopes);
+            compile_expr(file, resolved, solved, val, func, scopes);
             func.push_op(Opcode::Return);
         }
-    }
-}
-
-fn type_of_expr(file: &File, expr: Expr, func: &Function, scope: &Scope) -> Type {
-    match expr {
-        Expr::Local(local) => {
-            let local = *scope.items().get(file.str(local)).unwrap();
-            *func
-                .locals
-                .get::<usize>(local.local().try_into().unwrap())
-                .unwrap()
-        }
-        Expr::Literal(_) => Type::S4,
-        Expr::Plus(l, r) | Expr::Times(l, r) | Expr::Minus(l, r) => {
-            let l = type_of_expr(file, file.expr(l), func, scope);
-            let r = type_of_expr(file, file.expr(r), func, scope);
-            assert_eq!(l, r);
-            l
-        }
-        Expr::Let { .. }
-        | Expr::Set { .. }
-        | Expr::While { .. }
-        | Expr::Break(_)
-        | Expr::Return(_) => Type::Void,
     }
 }
 

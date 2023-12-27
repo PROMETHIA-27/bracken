@@ -8,6 +8,30 @@ pub struct Errors<T: Error> {
     errs: Vec<T>,
 }
 
+impl<T: Error> Errors<T> {
+    pub fn new() -> Self {
+        Self { errs: vec![] }
+    }
+
+    pub fn push(&mut self, err: T) {
+        self.errs.push(err);
+    }
+
+    pub fn len(&self) -> usize {
+        self.errs.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl<T: Error> Default for Errors<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Error> IntoIterator for Errors<T> {
     type Item = T;
 
