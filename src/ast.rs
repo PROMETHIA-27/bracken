@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
+use std::fmt::Display;
 use std::hash::Hash;
+use std::ops::Range;
 use std::sync::Arc;
 
 use crate::arena::{Arena, ExtendArena, Id, Interner};
@@ -37,6 +39,18 @@ impl PartialEq for File {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct Location {
+    pub line: usize,
+    pub col: usize,
+}
+
+impl Display for Location {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("Line {}, Column {}", self.line, self.col))
+    }
+}
+
 impl File {
     pub fn new(
         source: Arc<String>,
@@ -66,6 +80,10 @@ impl File {
         }
     }
 
+    pub fn source(&self) -> &Arc<String> {
+        &self.source
+    }
+
     pub fn exprs(&self) -> &Arena<Expr> {
         &self.exprs
     }
@@ -76,6 +94,21 @@ impl File {
 
     pub fn spans(&self) -> &ExtendArena<Expr, (usize, usize)> {
         &self.spans
+    }
+
+    pub fn span(&self, expr: Id<Expr>) -> Range<usize> {
+        let (s, e) = *self.spans.get_no_resize(expr).unwrap();
+        s..e
+    }
+
+    pub fn offset_to_loc(&self, offset: usize) -> Location {
+        let line = match self.lines.binary_search(&offset) {
+            Ok(index) | Err(index) => index - 1,
+        };
+        Location {
+            line,
+            col: offset - self.lines[line],
+        }
     }
 
     pub fn str(&self, string: Id<String>) -> &str {

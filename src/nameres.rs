@@ -7,6 +7,7 @@ use crate::bytecode::Type;
 #[derive(Clone, Debug)]
 pub struct Resolved {
     locals: HashMap<Id<Expr>, u32>,
+    local_count: usize,
     types: HashMap<Id<Expr>, Type>,
 }
 
@@ -14,6 +15,7 @@ impl Resolved {
     fn new() -> Self {
         Self {
             locals: HashMap::new(),
+            local_count: 0,
             types: HashMap::new(),
         }
     }
@@ -23,7 +25,7 @@ impl Resolved {
     }
 
     pub fn local_len(&self) -> usize {
-        self.locals.len()
+        self.local_count
     }
 
     pub fn typ(&self, expr: Id<Expr>) -> Type {
@@ -84,6 +86,7 @@ fn resolve_expr<'f>(
 
             let local = scopes.top_function_mut().kind_mut().alloc_local();
             scopes.add_local(file.str(name), local);
+            resolved.local_count += 1;
             resolved.locals.insert(expr, local);
 
             if let Some(ty) = ty {

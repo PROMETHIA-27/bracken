@@ -9,12 +9,12 @@ use crate::bytecode::{Function, LabelIndex, Module, Opcode, OpcodeIndex, Type};
 use crate::error::{Errors, OneOf};
 use crate::nameres::{self, Resolved};
 use crate::parser::FileParser;
-use crate::typecheck::{self, SolvedTypes};
+use crate::typecheck::{self, SolvedTypes, TyCheckError};
 
 #[derive(Clone, Debug, Error)]
 pub enum Error {
     #[error(transparent)]
-    Parse(#[from] ParseError),
+    Parse(#[from] CompileError),
     #[error(transparent)]
     Serialize(#[from] SerError),
 }
@@ -76,11 +76,18 @@ pub fn parse_ast(source: String) -> Result<File, ParseError> {
     Ok(file)
 }
 
-pub fn compile_bytecode(source: String) -> Result<Module, Errors<ParseError>> {
-    let file = parse_ast(source)?;
+#[derive(Clone, Debug, Error)]
+pub enum CompileError {
+    #[error(transparent)]
+    Parse(#[from] ParseError),
+    #[error(transparent)]
+    TyCheck(#[from] TyCheckError),
+}
+
+pub fn compile_bytecode(source: String) -> Result<Module, Errors<CompileError>> {
+    let file = parse_ast(source).map_err(CompileError::Parse)?;
     let resolved = nameres::resolve_names(&file);
-    // TODO: Handle these errors (make a new error type for this function)
-    let solved = typecheck::check_types(&file, &resolved).unwrap();
+    let solved = typecheck::check_types(&file, &resolved).map_err(Errors::into)?;
     let funcs = compile_file(&file, &resolved, &solved);
     Ok(Module { funcs })
 }

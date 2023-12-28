@@ -244,18 +244,24 @@ impl<T, E> ExtendArena<T, E> {
 }
 
 impl<T, E: Default> ExtendArena<T, E> {
+    fn reserve(&mut self, id: Id<T>) {
+        if id.index() >= self.len() {
+            self.items.resize_with(id.index() + 1, E::default);
+        }
+    }
+
     pub fn get(&mut self, id: Id<T>) -> &E {
-        self.items.resize_with(id.index() + 1, E::default);
+        self.reserve(id);
         &self.items[id.index()]
     }
 
     pub fn get_mut(&mut self, id: Id<T>) -> &mut E {
-        self.items.resize_with(id.index() + 1, E::default);
+        self.reserve(id);
         &mut self.items[id.index()]
     }
 
     pub fn set(&mut self, id: Id<T>, value: E) {
-        self.items.resize_with(id.index() + 1, E::default);
+        self.reserve(id);
         self.items[id.index()] = value;
     }
 }

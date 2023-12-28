@@ -33,37 +33,37 @@ pub Stmt: Stmt = {
 pub Expr: Id<Expr> = Spanned<AssignExpr>;
 
 pub AssignExpr: Id<Expr> = {
-    "let" <name:Ident> <ty:(":" <Ident>)?> "=" <value:AssignExpr> => 
+    "let" <name:Ident> <ty:(":" <Ident>)?> "=" <value:Spanned<AssignExpr>> => 
         exprs.push(Expr::Let { name, ty, value }),
-    <name:Ident> "=" <value:AssignExpr> => exprs.push(Expr::Set { name, value }),
-    ValueExpr,
+    <name:Ident> "=" <value:Spanned<AssignExpr>> => exprs.push(Expr::Set { name, value }),
+    Spanned<ValueExpr>,
 }
 
 pub ValueExpr: Id<Expr> = {
-    <l:ValueExpr> "+" <r:Term> => exprs.push(Expr::Plus(l, r)),
-    <l:ValueExpr> "-" <r:Term> => exprs.push(Expr::Minus(l, r)),
+    <l:Spanned<ValueExpr>> "+" <r:Spanned<Term>> => exprs.push(Expr::Plus(l, r)),
+    <l:Spanned<ValueExpr>> "-" <r:Spanned<Term>> => exprs.push(Expr::Minus(l, r)),
     Term,
 }
 
 pub Term: Id<Expr> = {
-    <l:Term> "*" <r:Factor> => exprs.push(Expr::Times(l, r)),
+    <l:Spanned<Term>> "*" <r:Spanned<Factor>> => exprs.push(Expr::Times(l, r)),
     Factor,
 }
 
 pub Factor: Id<Expr> = {
-    Return,
-    While,
-    Break,
+    Spanned<Return>,
+    Spanned<While>,
+    Spanned<Break>,
     <Literal> => exprs.push(Expr::Literal(<>)),
     <Ident> => exprs.push(Expr::Local(<>)),
-    "(" <Expr> ")" => <>,
+    "(" <Spanned<Expr>> ")" => <>,
 }
 
 pub Return: Id<Expr> =
-    "return" "(" <value:Expr?> ")" => exprs.push(Expr::Return(value));
+    "return" "(" <value:Spanned<Expr>?> ")" => exprs.push(Expr::Return(value));
 
 pub While: Id<Expr> = 
-    "while" <pred:Expr> <body:Stmts> "end" => exprs.push(Expr::While { pred, body });
+    "while" <pred:Spanned<Expr>> <body:Stmts> "end" => exprs.push(Expr::While { pred, body });
 
 pub Break: Id<Expr> = {
     "break" => exprs.push(Expr::Break(None)),

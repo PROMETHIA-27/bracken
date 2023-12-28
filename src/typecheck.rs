@@ -1,7 +1,10 @@
+use std::ops::Range;
+use std::sync::Arc;
+
 use thiserror::Error;
 
 use crate::arena::{ExtendArena, Id};
-use crate::ast::{Expr, File};
+use crate::ast::{Expr, File, Location};
 use crate::bytecode::Type;
 use crate::error::Errors;
 use crate::nameres::Resolved;
@@ -24,10 +27,10 @@ pub enum Constraint {
     Same(Id<Expr>, Id<Expr>),
 }
 
-#[derive(Debug, Error)]
+#[derive(Clone, Debug, Error)]
 pub enum TyCheckError {
-    #[error("insufficient information to determine type of expression")]
-    InsufficientInfo,
+    #[error("insufficient information to determine type of expression `{}` at {}", &.0[.1.clone()], .2)]
+    InsufficientInfo(Arc<String>, Range<usize>, Location),
     #[error("type mismatch")]
     TypeMismatch,
 }
@@ -43,7 +46,9 @@ impl LocalValues {
 
     fn get_or_init(&mut self, local: u32, value: Id<Expr>) -> Option<Id<Expr>> {
         let local: usize = local.try_into().unwrap();
-        self.values.resize(local + 1, None);
+        if local >= self.values.len() {
+            self.values.resize(local + 1, None);
+        }
 
         match self.values[local] {
             Some(value) => Some(value),
@@ -125,8 +130,8 @@ pub fn check_types(file: &File, resolved: &Resolved) -> Result<SolvedTypes, Erro
     let mut changed = false;
     let mut exit = false;
     while !exit {
-        match constraints[i] {
-            Constraint::Same(x, y) => {
+        match constraints.get(i) {
+            Some(&Constraint::Same(x, y)) => {
                 let (x, y) = order_by_solved(x, y, &mut solved);
                 let (xs, ys) = (solved.get(x).is_some(), solved.get(y).is_some());
                 if xs && ys {
@@ -156,13 +161,23 @@ pub fn check_types(file: &File, resolved: &Resolved) -> Result<SolvedTypes, Erro
                     }
                 }
             }
+            None => exit = true,
         }
     }
 
     for constraint in constraints {
         match constraint {
-            Constraint::Same(_x, _y) => {
-                errors.push(TyCheckError::InsufficientInfo);
+            Constraint::Same(x, y) => {
+                errors.push(TyCheckError::InsufficientInfo(
+                    file.source().clone(),
+                    file.span(x),
+                    file.offset_to_loc(file.span(x).start),
+                ));
+                errors.push(TyCheckError::InsufficientInfo(
+                    file.source().clone(),
+                    file.span(y),
+                    file.offset_to_loc(file.span(x).start),
+                ));
             }
         }
     }
