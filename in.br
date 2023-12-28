@@ -7,3 +7,7 @@ function main()
     end
     return(y)
 end
+
+function foo()
+    
+end

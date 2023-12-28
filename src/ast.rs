@@ -132,11 +132,23 @@ impl File {
 pub struct FnDef {
     name: Id<String>,
     body: Id<Stmts>,
+    params: Vec<(Id<String>, Id<String>)>,
+    ret_ty: Option<Id<String>>,
 }
 
 impl FnDef {
-    pub fn new(name: Id<String>, body: Id<Stmts>) -> Self {
-        FnDef { name, body }
+    pub fn new(
+        name: Id<String>,
+        body: Id<Stmts>,
+        params: Vec<(Id<String>, Id<String>)>,
+        ret_ty: Option<Id<String>>,
+    ) -> Self {
+        FnDef {
+            name,
+            body,
+            params,
+            ret_ty,
+        }
     }
 
     pub fn name(&self) -> Id<String> {

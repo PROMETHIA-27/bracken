@@ -22,7 +22,10 @@ pub File: File = <defs:FnDef*> => File::new(
 );
 
 pub FnDef: FnDef = 
-    "function" <name:Ident> "()" <body:Stmts> "end" => FnDef::new(name, body);
+    "function" <name:Ident> "(" <params:(<Ident> ":" <Ident>)*> ")" <ret_ty:("->" <Ident>)?> 
+        <body:Stmts> 
+    "end" 
+    => FnDef::new(name, body, params, ret_ty);
 
 pub Stmts: Id<Stmts> = <Stmt*> => stmts.push(Stmts::new(<>));
 
