@@ -7,7 +7,7 @@ use crate::bytecode::Type;
 #[derive(Clone, Debug)]
 pub struct Resolved {
     locals: HashMap<Id<Expr>, u32>,
-    local_count: usize,
+    local_count: HashMap<Id<String>, usize>,
     types: HashMap<Id<Expr>, Type>,
     params: HashMap<Id<String>, HashMap<Id<String>, Type>>,
     return_types: HashMap<Id<String>, Type>,
@@ -17,7 +17,7 @@ impl Resolved {
     fn new() -> Self {
         Self {
             locals: HashMap::new(),
-            local_count: 0,
+            local_count: HashMap::new(),
             types: HashMap::new(),
             params: HashMap::new(),
             return_types: HashMap::new(),
@@ -28,8 +28,8 @@ impl Resolved {
         self.locals[&expr]
     }
 
-    pub fn local_len(&self) -> usize {
-        self.local_count
+    pub fn local_len(&self, func: Id<String>) -> usize {
+        self.local_count[&func]
     }
 
     pub fn typ(&self, expr: Id<Expr>) -> Type {
@@ -59,6 +59,7 @@ pub fn resolve_file(file: &File, resolved: &mut Resolved) {
 
     for def in file.defs() {
         gather_func(def, &mut stack);
+        resolved.local_count.insert(def.name(), 0);
     }
 
     for def in file.defs() {
@@ -78,30 +79,45 @@ fn resolve_func(file: &File, def: &FnDef, stack: &mut ScopeStack, resolved: &mut
     }
     resolved.params.insert(def.name(), params);
 
-    let ret_ty = def.return_type().map(|ty| stack.ty(ty).unwrap()).unwrap_or(Type::Void);
+    let ret_ty = def
+        .return_type()
+        .map(|ty| stack.ty(ty).unwrap())
+        .unwrap_or(Type::Void);
     resolved.return_types.insert(def.name(), ret_ty);
 
     stack.push(Scope::function());
-    resolve_stmts(file, file.stmts(def.body()), stack, resolved);
+    resolve_stmts(file, def, file.stmts(def.body()), stack, resolved);
     stack.pop();
 }
 
-fn resolve_stmts(file: &File, stmts: &Stmts, scopes: &mut ScopeStack, resolved: &mut Resolved) {
+fn resolve_stmts(
+    file: &File,
+    def: &FnDef,
+    stmts: &Stmts,
+    scopes: &mut ScopeStack,
+    resolved: &mut Resolved,
+) {
     for stmt in stmts.stmts().iter().copied() {
         match stmt {
-            Stmt::Expr(expr) => resolve_expr(file, expr, scopes, resolved),
+            Stmt::Expr(expr) => resolve_expr(file, def, expr, scopes, resolved),
         }
     }
 }
 
-fn resolve_expr(file: &File, expr: Id<Expr>, scopes: &mut ScopeStack, resolved: &mut Resolved) {
+fn resolve_expr(
+    file: &File,
+    def: &FnDef,
+    expr: Id<Expr>,
+    scopes: &mut ScopeStack,
+    resolved: &mut Resolved,
+) {
     match file.expr(expr) {
         Expr::Let { name, ty, value } => {
-            resolve_expr(file, value, scopes, resolved);
+            resolve_expr(file, def, value, scopes, resolved);
 
             let local = scopes.top_function_mut().kind_mut().alloc_local();
             scopes.add_local(name, local);
-            resolved.local_count += 1;
+            *resolved.local_count.get_mut(&def.name()).unwrap() += 1;
             resolved.locals.insert(expr, local);
 
             if let Some(ty) = ty {
@@ -110,7 +126,7 @@ fn resolve_expr(file: &File, expr: Id<Expr>, scopes: &mut ScopeStack, resolved: 
             }
         }
         Expr::Set { name, value } => {
-            resolve_expr(file, value, scopes, resolved);
+            resolve_expr(file, def, value, scopes, resolved);
             let local = scopes.local(name).expect("unbound name");
             resolved.locals.insert(expr, local);
         }
@@ -119,19 +135,19 @@ fn resolve_expr(file: &File, expr: Id<Expr>, scopes: &mut ScopeStack, resolved: 
             resolved.locals.insert(expr, local);
         }
         Expr::Plus(lhs, rhs) | Expr::Minus(lhs, rhs) | Expr::Times(lhs, rhs) => {
-            resolve_expr(file, lhs, scopes, resolved);
-            resolve_expr(file, rhs, scopes, resolved);
+            resolve_expr(file, def, lhs, scopes, resolved);
+            resolve_expr(file, def, rhs, scopes, resolved);
         }
         Expr::While { pred, body } => {
-            resolve_expr(file, pred, scopes, resolved);
+            resolve_expr(file, def, pred, scopes, resolved);
 
             scopes.push(Scope::loop_());
-            resolve_stmts(file, file.stmts(body), scopes, resolved);
+            resolve_stmts(file, def, file.stmts(body), scopes, resolved);
             scopes.pop();
         }
         Expr::Break(val) | Expr::Return(val) => {
             if let Some(val) = val {
-                resolve_expr(file, val, scopes, resolved);
+                resolve_expr(file, def, val, scopes, resolved);
             }
         }
         Expr::Literal(_) => (),

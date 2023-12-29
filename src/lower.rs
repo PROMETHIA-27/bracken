@@ -153,7 +153,7 @@ fn compile_func(
         opcodes: vec![],
         labels: vec![OpcodeIndex::UNSET],
         label_pool: vec![],
-        locals: vec![Type::Void; resolved.local_len()],
+        locals: vec![Type::Void; resolved.local_len(def.name())],
     };
 
     compile_stmts(

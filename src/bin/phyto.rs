@@ -52,7 +52,6 @@ fn compile_func(func: &Function, jit: &mut Jit) {
     }
 
     let blocks = BasicBlocks::new(func.ops(), func);
-    println!("{blocks:?}");
     let block_map = blocks.block_map(&mut b);
     let blocks = blocks.0.clone().into_iter().map(
         |BasicBlock {
