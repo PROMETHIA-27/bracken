@@ -227,6 +227,8 @@ fn check_expr_types(
         }
         Expr::Plus(lhs, rhs) | Expr::Minus(lhs, rhs) | Expr::Times(lhs, rhs) => {
             constraints.push(Constraint::Same(lhs, rhs));
+            constraints.push(Constraint::Same(lhs, expr));
+            constraints.push(Constraint::Same(rhs, expr));
             check_expr_types(file, def, lhs, resolved, solved, constraints, locals);
             check_expr_types(file, def, rhs, resolved, solved, constraints, locals);
         }
