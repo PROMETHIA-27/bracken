@@ -56,10 +56,12 @@ impl File {
         source: Arc<String>,
         exprs: Arena<Expr>,
         spans: ExtendArena<Expr, (usize, usize)>,
-        strings: Interner<String>,
+        mut strings: Interner<String>,
         stmts: Arena<Stmts>,
         defs: Vec<FnDef>,
     ) -> Self {
+        Self::intern_builtin_strings(&mut strings);
+
         Self {
             lines: source
                 .chars()
@@ -78,6 +80,11 @@ impl File {
             stmts,
             defs,
         }
+    }
+
+    fn intern_builtin_strings(strings: &mut Interner<String>) {
+        strings.add("S4".into());
+        strings.add("F4".into());
     }
 
     pub fn source(&self) -> &Arc<String> {
@@ -113,6 +120,10 @@ impl File {
 
     pub fn str(&self, string: Id<String>) -> &str {
         self.strings.get(string)
+    }
+
+    pub fn str_id(&self, string: &str) -> Id<String> {
+        self.strings.get_id(string).unwrap()
     }
 
     pub fn stmts(&self, stmts: Id<Stmts>) -> &Stmts {
@@ -157,6 +168,14 @@ impl FnDef {
 
     pub fn body(&self) -> Id<Stmts> {
         self.body
+    }
+
+    pub fn params(&self) -> &[(Id<String>, Id<String>)] {
+        &self.params
+    }
+
+    pub fn return_type(&self) -> Option<Id<String>> {
+        self.ret_ty
     }
 }
 

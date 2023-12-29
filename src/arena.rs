@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -329,6 +330,14 @@ impl<T: Clone + Hash + Eq> Interner<T> {
 
     pub fn get(&self, id: Id<T>) -> &T {
         self.items.get(id.index()).expect("interner/id mismatch")
+    }
+
+    pub fn get_id<Q>(&self, value: &Q) -> Option<Id<T>>
+    where
+        T: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        self.lookup.get(value).copied().map(Id::new)
     }
 }
 

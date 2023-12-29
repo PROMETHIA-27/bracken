@@ -9,6 +9,8 @@ pub struct Resolved {
     locals: HashMap<Id<Expr>, u32>,
     local_count: usize,
     types: HashMap<Id<Expr>, Type>,
+    params: HashMap<Id<String>, HashMap<Id<String>, Type>>,
+    return_types: HashMap<Id<String>, Type>,
 }
 
 impl Resolved {
@@ -17,6 +19,8 @@ impl Resolved {
             locals: HashMap::new(),
             local_count: 0,
             types: HashMap::new(),
+            params: HashMap::new(),
+            return_types: HashMap::new(),
         }
     }
 
@@ -31,6 +35,14 @@ impl Resolved {
     pub fn typ(&self, expr: Id<Expr>) -> Type {
         self.types[&expr]
     }
+
+    pub fn params(&self, func: Id<String>) -> &HashMap<Id<String>, Type> {
+        &self.params[&func]
+    }
+
+    pub fn return_type(&self, func: Id<String>) -> Type {
+        self.return_types[&func]
+    }
 }
 
 pub fn resolve_names(file: &File) -> Resolved {
@@ -43,30 +55,38 @@ pub fn resolve_names(file: &File) -> Resolved {
 
 pub fn resolve_file(file: &File, resolved: &mut Resolved) {
     let mut stack = ScopeStack::new();
-    stack.push(Scope::top_level_scope());
+    stack.push(Scope::top_level_scope(file));
+
+    for def in file.defs() {
+        gather_func(def, &mut stack);
+    }
 
     for def in file.defs() {
         resolve_func(file, def, &mut stack, resolved);
     }
 }
 
-fn resolve_func<'f>(
-    file: &'f File,
-    def: &'f FnDef,
-    stack: &mut ScopeStack<'f>,
-    resolved: &mut Resolved,
-) {
+fn gather_func(def: &FnDef, stack: &mut ScopeStack) {
+    stack.add_function(def.name());
+}
+
+fn resolve_func(file: &File, def: &FnDef, stack: &mut ScopeStack, resolved: &mut Resolved) {
+    let mut params = HashMap::new();
+    for &(name, ty) in def.params() {
+        let ty = stack.ty(ty).unwrap();
+        params.insert(name, ty);
+    }
+    resolved.params.insert(def.name(), params);
+
+    let ret_ty = def.return_type().map(|ty| stack.ty(ty).unwrap()).unwrap_or(Type::Void);
+    resolved.return_types.insert(def.name(), ret_ty);
+
     stack.push(Scope::function());
     resolve_stmts(file, file.stmts(def.body()), stack, resolved);
     stack.pop();
 }
 
-fn resolve_stmts<'f>(
-    file: &'f File,
-    stmts: &'f Stmts,
-    scopes: &mut ScopeStack<'f>,
-    resolved: &mut Resolved,
-) {
+fn resolve_stmts(file: &File, stmts: &Stmts, scopes: &mut ScopeStack, resolved: &mut Resolved) {
     for stmt in stmts.stmts().iter().copied() {
         match stmt {
             Stmt::Expr(expr) => resolve_expr(file, expr, scopes, resolved),
@@ -74,33 +94,28 @@ fn resolve_stmts<'f>(
     }
 }
 
-fn resolve_expr<'f>(
-    file: &'f File,
-    expr: Id<Expr>,
-    scopes: &mut ScopeStack<'f>,
-    resolved: &mut Resolved,
-) {
+fn resolve_expr(file: &File, expr: Id<Expr>, scopes: &mut ScopeStack, resolved: &mut Resolved) {
     match file.expr(expr) {
         Expr::Let { name, ty, value } => {
             resolve_expr(file, value, scopes, resolved);
 
             let local = scopes.top_function_mut().kind_mut().alloc_local();
-            scopes.add_local(file.str(name), local);
+            scopes.add_local(name, local);
             resolved.local_count += 1;
             resolved.locals.insert(expr, local);
 
             if let Some(ty) = ty {
-                let ty = scopes.ty(file.str(ty)).expect("unbound name");
+                let ty = scopes.ty(ty).expect("unbound name");
                 resolved.types.insert(expr, ty);
             }
         }
         Expr::Set { name, value } => {
             resolve_expr(file, value, scopes, resolved);
-            let local = scopes.local(file.str(name)).expect("unbound name");
+            let local = scopes.local(name).expect("unbound name");
             resolved.locals.insert(expr, local);
         }
         Expr::Local(name) => {
-            let local = scopes.local(file.str(name)).expect("unbound name");
+            let local = scopes.local(name).expect("unbound name");
             resolved.locals.insert(expr, local);
         }
         Expr::Plus(lhs, rhs) | Expr::Minus(lhs, rhs) | Expr::Times(lhs, rhs) => {
@@ -127,6 +142,7 @@ fn resolve_expr<'f>(
 pub enum ScopeItem {
     Local(u32),
     Type(Type),
+    Function,
 }
 
 impl ScopeItem {
@@ -145,8 +161,8 @@ impl ScopeItem {
     }
 }
 
-struct Scope<'f> {
-    items: HashMap<&'f str, ScopeItem>,
+struct Scope {
+    items: HashMap<Id<String>, ScopeItem>,
     kind: ScopeKind,
 }
 
@@ -169,7 +185,7 @@ impl ScopeKind {
     }
 }
 
-impl<'f> Scope<'f> {
+impl Scope {
     fn new(kind: ScopeKind) -> Self {
         Self {
             items: HashMap::default(),
@@ -185,10 +201,14 @@ impl<'f> Scope<'f> {
         Self::new(ScopeKind::Loop)
     }
 
-    pub fn top_level_scope() -> Self {
+    pub fn top_level_scope(file: &File) -> Self {
         let mut scope = Self::new(ScopeKind::File);
-        scope.items.insert("S4", ScopeItem::Type(Type::S4));
-        scope.items.insert("F4", ScopeItem::Type(Type::F4));
+        scope
+            .items
+            .insert(file.str_id("S4"), ScopeItem::Type(Type::S4));
+        scope
+            .items
+            .insert(file.str_id("F4"), ScopeItem::Type(Type::F4));
         scope
     }
 
@@ -196,24 +216,24 @@ impl<'f> Scope<'f> {
         &mut self.kind
     }
 
-    pub fn items(&self) -> &HashMap<&str, ScopeItem> {
+    pub fn items(&self) -> &HashMap<Id<String>, ScopeItem> {
         &self.items
     }
 }
 
-struct ScopeStack<'f> {
-    scopes: Vec<Scope<'f>>,
+struct ScopeStack {
+    scopes: Vec<Scope>,
     functions: Vec<usize>,
     // TODO: HashMap<&str, SmallVec<[ScopeItem; 1]>>,
 }
 
-impl<'f> Default for ScopeStack<'f> {
+impl Default for ScopeStack {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<'f> ScopeStack<'f> {
+impl ScopeStack {
     pub fn new() -> Self {
         Self {
             scopes: vec![],
@@ -221,25 +241,25 @@ impl<'f> ScopeStack<'f> {
         }
     }
 
-    pub fn local(&self, name: &str) -> Option<u32> {
+    pub fn local(&self, name: Id<String>) -> Option<u32> {
         for scope in self.scopes.iter().rev() {
-            if let Some(local) = scope.items.get(name) {
+            if let Some(local) = scope.items.get(&name) {
                 return Some(local.local());
             }
         }
         None
     }
 
-    pub fn ty(&self, name: &str) -> Option<Type> {
+    pub fn ty(&self, name: Id<String>) -> Option<Type> {
         for scope in self.scopes.iter().rev() {
-            if let Some(ty) = scope.items.get(name) {
+            if let Some(ty) = scope.items.get(&name) {
                 return Some(ty.ty());
             }
         }
         None
     }
 
-    pub fn add_local(&mut self, name: &'f str, local: u32) {
+    pub fn add_local(&mut self, name: Id<String>, local: u32) {
         self.scopes
             .last_mut()
             .unwrap()
@@ -247,7 +267,7 @@ impl<'f> ScopeStack<'f> {
             .insert(name, ScopeItem::Local(local));
     }
 
-    pub fn add_type(&mut self, name: &'f str, ty: Type) {
+    pub fn add_type(&mut self, name: Id<String>, ty: Type) {
         self.scopes
             .last_mut()
             .unwrap()
@@ -255,15 +275,23 @@ impl<'f> ScopeStack<'f> {
             .insert(name, ScopeItem::Type(ty));
     }
 
+    pub fn add_function(&mut self, name: Id<String>) {
+        self.scopes
+            .last_mut()
+            .unwrap()
+            .items
+            .insert(name, ScopeItem::Function);
+    }
+
     pub fn top(&self) -> &Scope {
         self.scopes.last().unwrap()
     }
 
-    pub fn top_function_mut(&mut self) -> &mut Scope<'f> {
+    pub fn top_function_mut(&mut self) -> &mut Scope {
         &mut self.scopes[*self.functions.last().unwrap()]
     }
 
-    pub fn push(&mut self, scope: Scope<'f>) {
+    pub fn push(&mut self, scope: Scope) {
         match scope.kind {
             ScopeKind::Function { .. } => self.functions.push(self.scopes.len()),
             _ => (),
