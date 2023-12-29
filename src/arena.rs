@@ -267,6 +267,27 @@ impl<T, E: Default> ExtendArena<T, E> {
     }
 }
 
+impl<T, E: PartialEq> ExtendArena<T, Option<E>> {
+    /// Like `set()` but if there already exists a value and it is not equal to `value`,
+    /// returns `Err`
+    pub fn must_be(&mut self, id: Id<T>, value: E) -> Result<(), ()> {
+        self.reserve(id);
+        match &mut self.items[id.index()] {
+            Some(old) => {
+                if old != &value {
+                    Err(())
+                } else {
+                    Ok(())
+                }
+            }
+            None => {
+                self.items[id.index()] = Some(value);
+                Ok(())
+            }
+        }
+    }
+}
+
 impl<T, E> Default for ExtendArena<T, E> {
     fn default() -> Self {
         Self::new()
