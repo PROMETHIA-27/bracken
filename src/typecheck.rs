@@ -256,8 +256,17 @@ fn check_expr_types(
                 check_expr_types(file, def, value, resolved, solved, constraints, locals);
             }
         }
-        Expr::Call { .. } => {
-            todo!()
+        Expr::Call { params, .. } => {
+            // TODO: type checking the callee gonna be funky
+            let func = resolved.callee(expr);
+            let param_tys = resolved.params(func);
+
+            let params = file.exprlist(params);
+            assert_eq!(params.len(), param_tys.len());
+            
+            for ((_, &param_ty), &param) in param_tys.iter().zip(params) {
+                solved.must_be(param, param_ty).unwrap();
+            }
         }
     }
 }

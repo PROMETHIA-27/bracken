@@ -45,6 +45,10 @@ impl Resolved {
     pub fn return_type(&self, func: Id<String>) -> Type {
         self.return_types[&func]
     }
+
+    pub fn callee(&self, call: Id<Expr>) -> Id<String> {
+        self.callee[&call]
+    }
 }
 
 pub fn resolve_names(file: &File) -> Resolved {
