@@ -256,6 +256,9 @@ fn check_expr_types(
                 check_expr_types(file, def, value, resolved, solved, constraints, locals);
             }
         }
+        Expr::Call { .. } => {
+            todo!()
+        }
     }
 }
 

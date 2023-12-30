@@ -151,6 +151,7 @@ fn resolve_expr(
             }
         }
         Expr::Literal(_) => (),
+        Expr::Call { .. } => todo!(),
     }
 }
 

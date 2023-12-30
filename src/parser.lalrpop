@@ -7,6 +7,7 @@ use crate::ast::{File, FnDef, Expr, Stmt, Stmts};
 grammar(
     source: &Arc<String>,
     exprs: &CellArena<Expr>, 
+    exprlists: &CellArena<Vec<Id<Expr>>>,
     strings: &CellInterner<String>, 
     stmts: &CellArena<Stmts>, 
     spans: &CellExtendArena<Expr, (usize, usize)>
@@ -15,6 +16,7 @@ grammar(
 pub File: File = <defs:FnDef*> => File::new(
     source.clone(),
     exprs.take(), 
+    exprlists.take(),
     spans.take(),
     strings.take(), 
     stmts.take(), 
@@ -22,7 +24,7 @@ pub File: File = <defs:FnDef*> => File::new(
 );
 
 pub FnDef: FnDef = 
-    "function" <name:Ident> "(" <params:(<Ident> ":" <Ident>)*> ")" <ret_ty:("->" <Ident>)?> 
+    "function" <name:Ident> "(" <params:Comma<(<Ident> ":" <Ident>)>> ")" <ret_ty:("->" <Ident>)?> 
         <body:Stmts> 
     "end" 
     => FnDef::new(name, body, params, ret_ty);
@@ -57,16 +59,20 @@ pub Factor: Id<Expr> = {
     Spanned<Return>,
     Spanned<While>,
     Spanned<Break>,
+    <callee:Factor> "(" <params:Comma<Expr>> ")" => exprs.push(Expr::Call { 
+        callee, 
+        params: exprlists.push(params)
+    }),
     <Literal> => exprs.push(Expr::Literal(<>)),
     <Ident> => exprs.push(Expr::Local(<>)),
-    "(" <Spanned<Expr>> ")" => <>,
+    "{" <Expr> "}" => <>,
 }
 
 pub Return: Id<Expr> =
-    "return" "(" <value:Spanned<Expr>?> ")" => exprs.push(Expr::Return(value));
+    "return" "(" <value:Expr?> ")" => exprs.push(Expr::Return(value));
 
 pub While: Id<Expr> = 
-    "while" <pred:Spanned<Expr>> <body:Stmts> "end" => exprs.push(Expr::While { pred, body });
+    "while" <pred:Expr> <body:Stmts> "end" => exprs.push(Expr::While { pred, body });
 
 pub Break: Id<Expr> = {
     "break" => exprs.push(Expr::Break(None)),
@@ -83,5 +89,14 @@ Spanned<T>: T = {
     <l:@L> <t:T> <r:@R> => {
         spans.set(t, (l, r));
         t
+    }
+}
+
+Comma<T>: Vec<T> = {
+    <mut list:(<T> ",")*> <last:T?> => {
+        if let Some(value) = last {
+            list.push(value);
+        }
+        list
     }
 }

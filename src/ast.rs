@@ -11,6 +11,7 @@ pub struct File {
     source: Arc<String>,
     lines: Vec<usize>,
     exprs: Arena<Expr>,
+    exprlists: Arena<Vec<Id<Expr>>>,
     spans: ExtendArena<Expr, (usize, usize)>,
     // TODO: Move this to a higher level
     strings: Interner<String>,
@@ -55,6 +56,7 @@ impl File {
     pub fn new(
         source: Arc<String>,
         exprs: Arena<Expr>,
+        exprlists: Arena<Vec<Id<Expr>>>,
         spans: ExtendArena<Expr, (usize, usize)>,
         mut strings: Interner<String>,
         stmts: Arena<Stmts>,
@@ -75,6 +77,7 @@ impl File {
                 .map(|(i, def)| (def.name(), i))
                 .collect(),
             exprs,
+            exprlists,
             spans,
             strings,
             stmts,
@@ -198,19 +201,6 @@ pub enum Stmt {
 }
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq)]
-pub struct ExprId(u32);
-
-impl ExprId {
-    pub fn new(index: usize) -> Self {
-        Self(index.try_into().unwrap())
-    }
-
-    pub fn index(&self) -> usize {
-        self.0.try_into().unwrap()
-    }
-}
-
-#[derive(Clone, Copy, Debug, Hash, PartialEq)]
 pub enum Expr {
     Let {
         name: Id<String>,
@@ -232,4 +222,8 @@ pub enum Expr {
     },
     Break(Option<Id<Expr>>),
     Return(Option<Id<Expr>>),
+    Call {
+        callee: Id<Expr>,
+        params: Id<Vec<Id<Expr>>>,
+    },
 }

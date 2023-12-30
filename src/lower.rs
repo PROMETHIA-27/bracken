@@ -51,11 +51,14 @@ pub enum ParseError {
 pub fn parse_ast(source: String) -> Result<File, ParseError> {
     let source = Arc::new(source);
     let exprs = CellArena::new();
+    let exprlists = CellArena::new();
     let spans = CellExtendArena::new();
     let strings = CellInterner::new();
     let stmts = CellArena::new();
     let file = FileParser::new()
-        .parse(&source, &exprs, &strings, &stmts, &spans, &source)
+        .parse(
+            &source, &exprs, &exprlists, &strings, &stmts, &spans, &source,
+        )
         .map_err(|err| match err {
             lalrpop_util::ParseError::InvalidToken { location } => {
                 ParseError::InvalidToken(location)
@@ -263,6 +266,9 @@ fn compile_expr(
             let val = val.unwrap();
             compile_expr(file, resolved, solved, val, func, scopes);
             func.push_op(Opcode::Return);
+        }
+        Expr::Call { .. } => {
+            todo!()
         }
     }
 }
