@@ -64,7 +64,7 @@ pub Factor: Id<Expr> = {
         params: exprlists.push(params)
     }),
     <Literal> => exprs.push(Expr::Literal(<>)),
-    <Ident> => exprs.push(Expr::Local(<>)),
+    <Ident> => exprs.push(Expr::Name(<>)),
     "{" <Expr> "}" => <>,
 }
 

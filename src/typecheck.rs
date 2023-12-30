@@ -213,7 +213,7 @@ fn check_expr_types(
 
             check_expr_types(file, def, value, resolved, solved, constraints, locals);
         }
-        Expr::Local(_) => {
+        Expr::Name(_) => {
             let local = resolved.local(expr);
             match locals.get_or_init(local, expr) {
                 Some(other) => {

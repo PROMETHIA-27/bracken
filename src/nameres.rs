@@ -11,6 +11,7 @@ pub struct Resolved {
     types: HashMap<Id<Expr>, Type>,
     params: HashMap<Id<String>, HashMap<Id<String>, Type>>,
     return_types: HashMap<Id<String>, Type>,
+    callee: HashMap<Id<Expr>, Id<String>>,
 }
 
 impl Resolved {
@@ -21,6 +22,7 @@ impl Resolved {
             types: HashMap::new(),
             params: HashMap::new(),
             return_types: HashMap::new(),
+            callee: HashMap::new(),
         }
     }
 
@@ -130,7 +132,7 @@ fn resolve_expr(
             let local = scopes.local(name).expect("unbound name");
             resolved.locals.insert(expr, local);
         }
-        Expr::Local(name) => {
+        Expr::Name(name) => {
             let local = scopes.local(name).expect("unbound name");
             resolved.locals.insert(expr, local);
         }
@@ -151,7 +153,21 @@ fn resolve_expr(
             }
         }
         Expr::Literal(_) => (),
-        Expr::Call { .. } => todo!(),
+        Expr::Call { callee, params } => {
+            resolve_expr(file, def, callee, scopes, resolved);
+
+            for &param in file.exprlist(params) {
+                resolve_expr(file, def, param, scopes, resolved);
+            }
+
+            match file.expr(callee) {
+                Expr::Name(name) => {
+                    let func = scopes.function(name).expect("unbound name");
+                    resolved.callee.insert(expr, func);
+                }
+                _ => todo!(),
+            }
+        }
     }
 }
 
@@ -173,6 +189,13 @@ impl ScopeItem {
     pub fn ty(self) -> Type {
         match self {
             ScopeItem::Type(ty) => ty,
+            _ => panic!(),
+        }
+    }
+
+    pub fn function(self) {
+        match self {
+            ScopeItem::Function => (),
             _ => panic!(),
         }
     }
@@ -271,6 +294,16 @@ impl ScopeStack {
         for scope in self.scopes.iter().rev() {
             if let Some(ty) = scope.items.get(&name) {
                 return Some(ty.ty());
+            }
+        }
+        None
+    }
+
+    pub fn function(&self, name: Id<String>) -> Option<Id<String>> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(func) = scope.items.get(&name) {
+                func.function();
+                return Some(name);
             }
         }
         None

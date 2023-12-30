@@ -102,6 +102,10 @@ impl File {
         *self.exprs.get(expr)
     }
 
+    pub fn exprlist(&self, exprlist: Id<Vec<Id<Expr>>>) -> &Vec<Id<Expr>> {
+        self.exprlists.get(exprlist)
+    }
+
     pub fn spans(&self) -> &ExtendArena<Expr, (usize, usize)> {
         &self.spans
     }
@@ -211,7 +215,7 @@ pub enum Expr {
         name: Id<String>,
         value: Id<Expr>,
     },
-    Local(Id<String>),
+    Name(Id<String>),
     Literal(i32),
     Plus(Id<Expr>, Id<Expr>),
     Minus(Id<Expr>, Id<Expr>),

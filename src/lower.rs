@@ -208,7 +208,7 @@ fn compile_expr(
             let local = resolved.local(expr);
             func.push_op(Opcode::StoreLocal(local));
         }
-        Expr::Local(_) => {
+        Expr::Name(_) => {
             let local = resolved.local(expr);
             func.push_op(Opcode::LoadLocal(local));
         }
