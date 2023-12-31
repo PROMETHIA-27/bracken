@@ -22,6 +22,7 @@ pub enum Type {
     S4,
     F4,
     Void,
+    Function,
 }
 
 impl Type {
@@ -29,7 +30,7 @@ impl Type {
         match self {
             Type::S4 => Some(cranelift_codegen::ir::types::I32),
             Type::F4 => Some(cranelift_codegen::ir::types::F32),
-            Type::Void => None,
+            Type::Void | Type::Function => None,
         }
     }
 

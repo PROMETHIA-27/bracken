@@ -256,8 +256,9 @@ fn check_expr_types(
                 check_expr_types(file, def, value, resolved, solved, constraints, locals);
             }
         }
-        Expr::Call { params, .. } => {
+        Expr::Call { callee, params } => {
             // TODO: type checking the callee gonna be funky
+            solved.must_be(callee, Type::Function).unwrap();
             let func = resolved.callee(expr);
             let param_tys = resolved.params(func);
 

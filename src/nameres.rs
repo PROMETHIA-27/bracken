@@ -137,8 +137,13 @@ fn resolve_expr(
             resolved.locals.insert(expr, local);
         }
         Expr::Name(name) => {
-            let local = scopes.local(name).expect("unbound name");
-            resolved.locals.insert(expr, local);
+            match *scopes.item(name).expect("unbound name") {
+                ScopeItem::Local(local) => {
+                    resolved.locals.insert(expr, local);
+                },
+                ScopeItem::Type(_) => panic!("type in expression location"),
+                ScopeItem::Function => (),
+            }
         }
         Expr::Plus(lhs, rhs) | Expr::Minus(lhs, rhs) | Expr::Times(lhs, rhs) => {
             resolve_expr(file, def, lhs, scopes, resolved);
@@ -158,7 +163,8 @@ fn resolve_expr(
         }
         Expr::Literal(_) => (),
         Expr::Call { callee, params } => {
-            resolve_expr(file, def, callee, scopes, resolved);
+            // TODO: calls can only be names right now and that breaks to resolve
+            // resolve_expr(file, def, callee, scopes, resolved);
 
             for &param in file.exprlist(params) {
                 resolve_expr(file, def, param, scopes, resolved);
@@ -183,21 +189,21 @@ pub enum ScopeItem {
 }
 
 impl ScopeItem {
-    pub fn local(self) -> u32 {
+    pub fn local(&self) -> u32 {
         match self {
-            ScopeItem::Local(local) => local,
+            ScopeItem::Local(local) => *local,
             _ => panic!(),
         }
     }
 
-    pub fn ty(self) -> Type {
+    pub fn ty(&self) -> Type {
         match self {
-            ScopeItem::Type(ty) => ty,
+            ScopeItem::Type(ty) => *ty,
             _ => panic!(),
         }
     }
 
-    pub fn function(self) {
+    pub fn function(&self) {
         match self {
             ScopeItem::Function => (),
             _ => panic!(),
@@ -285,32 +291,25 @@ impl ScopeStack {
         }
     }
 
-    pub fn local(&self, name: Id<String>) -> Option<u32> {
+    pub fn item(&self, name: Id<String>) -> Option<&ScopeItem> {
         for scope in self.scopes.iter().rev() {
             if let Some(local) = scope.items.get(&name) {
-                return Some(local.local());
+                return Some(local);
             }
         }
         None
+    }
+
+    pub fn local(&self, name: Id<String>) -> Option<u32> {
+        self.item(name).map(ScopeItem::local)
     }
 
     pub fn ty(&self, name: Id<String>) -> Option<Type> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(ty) = scope.items.get(&name) {
-                return Some(ty.ty());
-            }
-        }
-        None
+        self.item(name).map(ScopeItem::ty)
     }
 
     pub fn function(&self, name: Id<String>) -> Option<Id<String>> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(func) = scope.items.get(&name) {
-                func.function();
-                return Some(name);
-            }
-        }
-        None
+        self.item(name).map(ScopeItem::function).map(|_| name)
     }
 
     pub fn add_local(&mut self, name: Id<String>, local: u32) {

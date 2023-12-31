@@ -5,7 +5,7 @@ function main() -> S4
         x = x + 1
         y = x * 2
     end
-    return(y)
+    return(y + foo())
 end
 
 function foo() -> S4
