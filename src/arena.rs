@@ -51,7 +51,7 @@ impl<T> Ord for Id<T> {
 }
 
 impl<T> Id<T> {
-    fn new(index: usize) -> Self {
+    pub fn new(index: usize) -> Self {
         let index: u32 = index.try_into().unwrap();
         let index = match index.checked_add(1) {
             Some(i) => i,

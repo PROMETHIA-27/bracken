@@ -270,7 +270,13 @@ fn compile_expr(
             func.push_op(Opcode::Return);
         }
         Expr::Call { params, .. } => {
-            todo!()
+            for &param in file.exprlist(params) {
+                compile_expr(file, resolved, solved, param, func, scopes);
+            }
+
+            let callee = resolved.callee(expr);
+            let callee = file.def_id(callee);
+            func.push_op(Opcode::Call(callee));
         }
     }
 }

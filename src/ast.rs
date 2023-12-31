@@ -5,6 +5,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::arena::{Arena, ExtendArena, Id, Interner};
+use crate::bytecode::Function;
 
 #[derive(Clone)]
 pub struct File {
@@ -139,6 +140,10 @@ impl File {
 
     pub fn def(&self, name: Id<String>) -> &FnDef {
         &self.defs[self.def_ids[&name]]
+    }
+
+    pub fn def_id(&self, name: Id<String>) -> Id<Function> {
+        Id::new(self.def_ids[&name])
     }
 
     pub fn defs(&self) -> &[FnDef] {
