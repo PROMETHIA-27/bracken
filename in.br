@@ -8,6 +8,6 @@ function main() -> S4
     return(y)
 end
 
-function foo()
-    
+function foo() -> S4
+    return(12)
 end

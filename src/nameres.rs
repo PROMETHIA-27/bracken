@@ -9,7 +9,7 @@ pub struct Resolved {
     locals: HashMap<Id<Expr>, u32>,
     local_count: HashMap<Id<String>, usize>,
     types: HashMap<Id<Expr>, Type>,
-    params: HashMap<Id<String>, HashMap<Id<String>, Type>>,
+    params: HashMap<Id<String>, Vec<Type>>,
     return_types: HashMap<Id<String>, Type>,
     callee: HashMap<Id<Expr>, Id<String>>,
 }
@@ -38,7 +38,7 @@ impl Resolved {
         self.types[&expr]
     }
 
-    pub fn params(&self, func: Id<String>) -> &HashMap<Id<String>, Type> {
+    pub fn params(&self, func: Id<String>) -> &[Type] {
         &self.params[&func]
     }
 
@@ -78,10 +78,10 @@ fn gather_func(def: &FnDef, stack: &mut ScopeStack) {
 }
 
 fn resolve_func(file: &File, def: &FnDef, stack: &mut ScopeStack, resolved: &mut Resolved) {
-    let mut params = HashMap::new();
+    let mut params = vec![];
     for &(name, ty) in def.params() {
         let ty = stack.ty(ty).unwrap();
-        params.insert(name, ty);
+        params.push(ty);
     }
     resolved.params.insert(def.name(), params);
 

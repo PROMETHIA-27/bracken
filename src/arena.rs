@@ -5,6 +5,9 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize)]
 pub struct Id<T>(NonZeroU32, PhantomData<fn() -> T>);
 
 impl<T> Clone for Id<T> {

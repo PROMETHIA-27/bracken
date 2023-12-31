@@ -263,8 +263,8 @@ fn check_expr_types(
 
             let params = file.exprlist(params);
             assert_eq!(params.len(), param_tys.len());
-            
-            for ((_, &param_ty), &param) in param_tys.iter().zip(params) {
+
+            for (&param_ty, &param) in param_tys.iter().zip(params) {
                 solved.must_be(param, param_ty).unwrap();
             }
         }

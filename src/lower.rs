@@ -157,6 +157,8 @@ fn compile_func(
         labels: vec![OpcodeIndex::UNSET],
         label_pool: vec![],
         locals: vec![Type::Void; resolved.local_len(def.name())],
+        params: resolved.params(def.name()).to_vec(),
+        return_type: resolved.return_type(def.name()),
     };
 
     compile_stmts(
@@ -267,7 +269,7 @@ fn compile_expr(
             compile_expr(file, resolved, solved, val, func, scopes);
             func.push_op(Opcode::Return);
         }
-        Expr::Call { .. } => {
+        Expr::Call { params, .. } => {
             todo!()
         }
     }
