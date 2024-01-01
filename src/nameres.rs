@@ -61,7 +61,7 @@ pub fn resolve_names(file: &File) -> Resolved {
 
 pub fn resolve_file(file: &File, resolved: &mut Resolved) {
     let mut stack = ScopeStack::new();
-    stack.push(Scope::top_level_scope(file));
+    stack.push_top_level_scope(file);
 
     for def in file.defs() {
         gather_func(def, &mut stack);
@@ -79,7 +79,7 @@ fn gather_func(def: &FnDef, stack: &mut ScopeStack) {
 
 fn resolve_func(file: &File, def: &FnDef, stack: &mut ScopeStack, resolved: &mut Resolved) {
     let mut params = vec![];
-    for &(name, ty) in def.params() {
+    for &(_, ty) in def.params() {
         let ty = stack.ty(ty).unwrap();
         params.push(ty);
     }
@@ -91,7 +91,7 @@ fn resolve_func(file: &File, def: &FnDef, stack: &mut ScopeStack, resolved: &mut
         .unwrap_or(Type::Void);
     resolved.return_types.insert(def.name(), ret_ty);
 
-    stack.push(Scope::function());
+    stack.push(ScopeKind::Function { locals: 0 });
     resolve_stmts(file, def, file.stmts(def.body()), stack, resolved);
     stack.pop();
 }
@@ -121,7 +121,7 @@ fn resolve_expr(
         Expr::Let { name, ty, value } => {
             resolve_expr(file, def, value, scopes, resolved);
 
-            let local = scopes.top_function_mut().kind_mut().alloc_local();
+            let local = scopes.top_function_mut().alloc_local();
             scopes.add_local(name, local);
             *resolved.local_count.get_mut(&def.name()).unwrap() += 1;
             resolved.locals.insert(expr, local);
@@ -136,15 +136,13 @@ fn resolve_expr(
             let local = scopes.local(name).expect("unbound name");
             resolved.locals.insert(expr, local);
         }
-        Expr::Name(name) => {
-            match *scopes.item(name).expect("unbound name") {
-                ScopeItem::Local(local) => {
-                    resolved.locals.insert(expr, local);
-                },
-                ScopeItem::Type(_) => panic!("type in expression location"),
-                ScopeItem::Function => (),
+        Expr::Name(name) => match *scopes.item(name).expect("unbound name") {
+            ScopeItem::Local(local) => {
+                resolved.locals.insert(expr, local);
             }
-        }
+            ScopeItem::Type(_) => panic!("type in expression location"),
+            ScopeItem::Function => (),
+        },
         Expr::Plus(lhs, rhs) | Expr::Minus(lhs, rhs) | Expr::Times(lhs, rhs) => {
             resolve_expr(file, def, lhs, scopes, resolved);
             resolve_expr(file, def, rhs, scopes, resolved);
@@ -152,7 +150,7 @@ fn resolve_expr(
         Expr::While { pred, body } => {
             resolve_expr(file, def, pred, scopes, resolved);
 
-            scopes.push(Scope::loop_());
+            scopes.push(ScopeKind::Loop);
             resolve_stmts(file, def, file.stmts(body), scopes, resolved);
             scopes.pop();
         }
@@ -211,11 +209,6 @@ impl ScopeItem {
     }
 }
 
-struct Scope {
-    items: HashMap<Id<String>, ScopeItem>,
-    kind: ScopeKind,
-}
-
 enum ScopeKind {
     Function { locals: u32 },
     Loop,
@@ -235,46 +228,11 @@ impl ScopeKind {
     }
 }
 
-impl Scope {
-    fn new(kind: ScopeKind) -> Self {
-        Self {
-            items: HashMap::default(),
-            kind,
-        }
-    }
-
-    pub fn function() -> Self {
-        Self::new(ScopeKind::Function { locals: 0 })
-    }
-
-    pub fn loop_() -> Self {
-        Self::new(ScopeKind::Loop)
-    }
-
-    pub fn top_level_scope(file: &File) -> Self {
-        let mut scope = Self::new(ScopeKind::File);
-        scope
-            .items
-            .insert(file.str_id("S4"), ScopeItem::Type(Type::S4));
-        scope
-            .items
-            .insert(file.str_id("F4"), ScopeItem::Type(Type::F4));
-        scope
-    }
-
-    pub fn kind_mut(&mut self) -> &mut ScopeKind {
-        &mut self.kind
-    }
-
-    pub fn items(&self) -> &HashMap<Id<String>, ScopeItem> {
-        &self.items
-    }
-}
-
 struct ScopeStack {
-    scopes: Vec<Scope>,
+    scopes: Vec<(ScopeKind, usize)>,
+    items: Vec<(Id<String>, ScopeItem)>,
     functions: Vec<usize>,
-    // TODO: HashMap<&str, SmallVec<[ScopeItem; 1]>>,
+    // TODO: test perf of HashMap<&str, SmallVec<[ScopeItem; 1]>>,
 }
 
 impl Default for ScopeStack {
@@ -287,17 +245,22 @@ impl ScopeStack {
     pub fn new() -> Self {
         Self {
             scopes: vec![],
+            items: vec![],
             functions: vec![],
         }
     }
 
+    pub fn push_top_level_scope(&mut self, file: &File) {
+        self.push(ScopeKind::File);
+        self.add_type(file.str_id("S4"), Type::S4);
+        self.add_type(file.str_id("F4"), Type::F4);
+    }
+
     pub fn item(&self, name: Id<String>) -> Option<&ScopeItem> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(local) = scope.items.get(&name) {
-                return Some(local);
-            }
-        }
-        None
+        self.items
+            .iter()
+            .rev()
+            .find_map(|(n, item)| (*n == name).then_some(item))
     }
 
     pub fn local(&self, name: Id<String>) -> Option<u32> {
@@ -313,50 +276,38 @@ impl ScopeStack {
     }
 
     pub fn add_local(&mut self, name: Id<String>, local: u32) {
-        self.scopes
-            .last_mut()
-            .unwrap()
-            .items
-            .insert(name, ScopeItem::Local(local));
+        self.items.push((name, ScopeItem::Local(local)));
     }
 
     pub fn add_type(&mut self, name: Id<String>, ty: Type) {
-        self.scopes
-            .last_mut()
-            .unwrap()
-            .items
-            .insert(name, ScopeItem::Type(ty));
+        self.items.push((name, ScopeItem::Type(ty)));
     }
 
     pub fn add_function(&mut self, name: Id<String>) {
-        self.scopes
-            .last_mut()
-            .unwrap()
-            .items
-            .insert(name, ScopeItem::Function);
+        self.items.push((name, ScopeItem::Function));
     }
 
-    pub fn top(&self) -> &Scope {
-        self.scopes.last().unwrap()
+    pub fn top_function_mut(&mut self) -> &mut ScopeKind {
+        &mut self.scopes[*self.functions.last().unwrap()].0
     }
 
-    pub fn top_function_mut(&mut self) -> &mut Scope {
-        &mut self.scopes[*self.functions.last().unwrap()]
-    }
-
-    pub fn push(&mut self, scope: Scope) {
-        match scope.kind {
+    pub fn push(&mut self, scope: ScopeKind) {
+        match scope {
             ScopeKind::Function { .. } => self.functions.push(self.scopes.len()),
             _ => (),
         }
 
-        self.scopes.push(scope);
+        self.scopes.push((scope, self.items.len()));
     }
 
     pub fn pop(&mut self) {
-        match self.scopes.pop().expect("popped too many scopes").kind {
+        let (kind, height) = self.scopes.pop().expect("popped too many scopes");
+
+        match kind {
             ScopeKind::Function { .. } => _ = self.functions.pop().unwrap(),
             _ => (),
         }
+
+        self.items.truncate(height);
     }
 }
