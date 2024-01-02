@@ -11,7 +11,7 @@ use crate::Db;
 
 #[salsa::tracked]
 pub struct SolvedTypes {
-    data: SolvedTypesData,
+    pub data: SolvedTypesData,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -94,7 +94,7 @@ pub fn check_types(
     db: &dyn Db,
     file: File,
     resolved: Resolved,
-) -> Result<SolvedTypesData, Errors<TyCheckError>> {
+) -> Result<SolvedTypes, Errors<TyCheckError>> {
     let mut solved = HashMap::new();
     let mut errors = Errors::new();
 
@@ -103,7 +103,7 @@ pub fn check_types(
     }
 
     if errors.is_empty() {
-        Ok(SolvedTypesData { tys: solved })
+        Ok(SolvedTypes::new(db, SolvedTypesData { tys: solved }))
     } else {
         Err(errors)
     }
