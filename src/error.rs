@@ -3,7 +3,7 @@ use std::fmt::Display;
 
 use thiserror::Error;
 
-#[derive(Clone, Debug, Error)]
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub struct Errors<T: Error> {
     errs: Vec<T>,
 }

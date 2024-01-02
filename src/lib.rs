@@ -20,6 +20,8 @@ pub struct Jar(
     ast::ExprList,
     nameres::Resolved,
     nameres::resolve_names,
+    typecheck::SolvedTypes,
+    typecheck::check_types,
 );
 
 pub trait Db: salsa::DbWithJar<Jar> {}

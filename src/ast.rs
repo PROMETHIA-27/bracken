@@ -102,7 +102,7 @@ pub struct ExprList {
     pub exprs: Vec<Expr>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Location {
     pub line: usize,
     pub col: usize,

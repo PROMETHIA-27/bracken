@@ -5,7 +5,7 @@ use crate::ast::{self, Expr, ExprKind, File, FnDef, ParseError, SourceFile, Stmt
 use crate::bytecode::{Function, LabelIndex, Module, Opcode, OpcodeIndex, Type};
 use crate::error::Errors;
 use crate::nameres::{self, Resolved};
-use crate::typecheck::{self, SolvedTypes, TyCheckError};
+use crate::typecheck::{self, SolvedTypesData, TyCheckError};
 use crate::{Database, Db};
 
 #[derive(Clone, Debug, Error)]
@@ -45,7 +45,7 @@ pub fn compile_bytecode(source: String) -> Result<Module, Errors<CompileError>> 
     let db = Database::default();
     let file = ast::file_ast(&db, SourceFile::new(&db, source)).map_err(CompileError::Parse)?;
     let resolved = nameres::resolve_names(&db, file);
-    let solved = typecheck::check_types(&db, &file, &resolved).map_err(Errors::into)?;
+    let solved = typecheck::check_types(&db, file, resolved).map_err(Errors::into)?;
     let funcs = compile_file(&db, &file, &resolved, &solved);
     Ok(Module { funcs })
 }
@@ -93,7 +93,7 @@ pub fn compile_file(
     db: &dyn Db,
     file: &File,
     resolved: &Resolved,
-    solved: &SolvedTypes,
+    solved: &SolvedTypesData,
 ) -> Vec<Function> {
     let mut stack = LabelScopeStack::new();
     stack.push(LabelScope::top_level());
@@ -108,7 +108,7 @@ fn compile_func(
     db: &dyn Db,
     file: &File,
     resolved: &Resolved,
-    solved: &SolvedTypes,
+    solved: &SolvedTypesData,
     def: &FnDef,
     stack: &mut LabelScopeStack,
 ) -> Function {
@@ -132,7 +132,7 @@ fn compile_stmts(
     db: &dyn Db,
     file: &File,
     resolved: &Resolved,
-    solved: &SolvedTypes,
+    solved: &SolvedTypesData,
     stmts: Stmts,
     func: &mut Function,
     scopes: &mut LabelScopeStack,
@@ -148,7 +148,7 @@ fn compile_expr(
     db: &dyn Db,
     file: &File,
     resolved: &Resolved,
-    solved: &SolvedTypes,
+    solved: &SolvedTypesData,
     expr: Expr,
     func: &mut Function,
     scopes: &mut LabelScopeStack,

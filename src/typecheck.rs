@@ -9,11 +9,17 @@ use crate::error::Errors;
 use crate::nameres::Resolved;
 use crate::Db;
 
+#[salsa::tracked]
 pub struct SolvedTypes {
+    data: SolvedTypesData,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SolvedTypesData {
     tys: HashMap<Expr, Type>,
 }
 
-impl SolvedTypes {
+impl SolvedTypesData {
     pub fn get(&self, expr: Expr) -> Type {
         *self
             .tys
@@ -49,7 +55,7 @@ pub enum Constraint {
     Same(Expr, Expr),
 }
 
-#[derive(Clone, Debug, Error)]
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum TyCheckError {
     // TODO: use SourceText instead and DebugWithDb
     #[error("insufficient information to determine type of expression `{}` at {}", &.0[.1.clone()], .2)]
@@ -83,11 +89,12 @@ impl LocalValues {
     }
 }
 
+#[salsa::tracked]
 pub fn check_types(
     db: &dyn Db,
-    file: &File,
-    resolved: &Resolved,
-) -> Result<SolvedTypes, Errors<TyCheckError>> {
+    file: File,
+    resolved: Resolved,
+) -> Result<SolvedTypesData, Errors<TyCheckError>> {
     let mut solved = HashMap::new();
     let mut errors = Errors::new();
 
@@ -96,7 +103,7 @@ pub fn check_types(
     }
 
     if errors.is_empty() {
-        Ok(SolvedTypes { tys: solved })
+        Ok(SolvedTypesData { tys: solved })
     } else {
         Err(errors)
     }
@@ -104,9 +111,9 @@ pub fn check_types(
 
 fn check_fn_types(
     db: &dyn Db,
-    file: &File,
+    file: File,
     def: &FnDef,
-    resolved: &Resolved,
+    resolved: Resolved,
     solved: &mut HashMap<Expr, Type>,
     errors: &mut Errors<TyCheckError>,
 ) {
@@ -183,10 +190,10 @@ fn check_fn_types(
 
 fn check_stmts_types(
     db: &dyn Db,
-    file: &File,
+    file: File,
     def: &FnDef,
     stmts: Stmts,
-    resolved: &Resolved,
+    resolved: Resolved,
     solved: &mut HashMap<Expr, Type>,
     constraints: &mut Vec<Constraint>,
     locals: &mut LocalValues,
@@ -202,10 +209,10 @@ fn check_stmts_types(
 
 fn check_expr_types(
     db: &dyn Db,
-    file: &File,
+    file: File,
     def: &FnDef,
     expr: Expr,
-    resolved: &Resolved,
+    resolved: Resolved,
     solved: &mut HashMap<Expr, Type>,
     constraints: &mut Vec<Constraint>,
     locals: &mut LocalValues,
