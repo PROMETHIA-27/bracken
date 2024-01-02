@@ -53,7 +53,6 @@ pub fn file_ast(db: &dyn Db, source: SourceFile) -> Result<File, ParseError> {
 
 #[salsa::tracked]
 pub struct File {
-    #[return_ref]
     pub source: SourceFile,
     #[return_ref]
     pub lines: Vec<usize>,
@@ -75,7 +74,7 @@ impl File {
         let def_ids = defs
             .iter()
             .enumerate()
-            .map(|(i, def)| (def.name, i))
+            .map(|(i, def)| (def.name(db), i))
             .collect();
 
         Self::new(db, source, lines, def_ids, defs)
@@ -120,7 +119,7 @@ pub struct Name {
     pub text: String,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+#[salsa::tracked]
 pub struct FnDef {
     pub name: Name,
     pub body: Stmts,

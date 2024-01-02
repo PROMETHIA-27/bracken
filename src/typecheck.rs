@@ -124,7 +124,7 @@ fn check_fn_types(
         db,
         file,
         def,
-        def.body,
+        def.body(db),
         resolved,
         solved,
         &mut constraints,
@@ -287,7 +287,7 @@ fn check_expr_types(
             solved.must_be(expr, Type::Void).unwrap();
 
             if let Some(value) = value {
-                let ret_ty = resolved.return_type(db, def.name);
+                let ret_ty = resolved.return_type(db, def.name(db));
                 solved.must_be(value, ret_ty).unwrap();
                 check_expr_types(db, file, def, value, resolved, solved, constraints, locals);
             }

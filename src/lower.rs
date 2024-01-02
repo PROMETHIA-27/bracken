@@ -112,17 +112,18 @@ fn compile_func(
     def: &FnDef,
     stack: &mut LabelScopeStack,
 ) -> Function {
+    let name = def.name(db);
     let mut func = Function {
-        name: def.name.text(db).to_string(),
+        name: name.text(db).to_string(),
         opcodes: vec![],
         labels: vec![OpcodeIndex::UNSET],
         label_pool: vec![],
-        locals: vec![Type::Void; resolved.local_len(db, def.name)],
-        params: resolved.params_of(db, def.name).to_vec(),
-        return_type: resolved.return_type(db, def.name),
+        locals: vec![Type::Void; resolved.local_len(db, name)],
+        params: resolved.params_of(db, name).to_vec(),
+        return_type: resolved.return_type(db, name),
     };
 
-    compile_stmts(db, file, resolved, solved, def.body, &mut func, stack);
+    compile_stmts(db, file, resolved, solved, def.body(db), &mut func, stack);
 
     func.labels[0] = OpcodeIndex::new(func.opcodes.len());
     func

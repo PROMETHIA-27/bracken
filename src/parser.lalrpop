@@ -11,7 +11,7 @@ pub FnDef: FnDef =
     "function" <name:Ident> "(" <params:Comma<(<Ident> ":" <Ident>)>> ")" <return_type:("->" <Ident>)?> 
         <body:Stmts> 
     "end" => 
-        FnDef { name, body, params, return_type };
+        FnDef::new(db, name, body, params, return_type);
 
 pub Stmts: Stmts = <Stmt*> => Stmts::new(db, <>);
 

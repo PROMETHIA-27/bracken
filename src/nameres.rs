@@ -60,8 +60,8 @@ pub fn resolve_file(db: &dyn Db, file: File, resolved: &mut ResolvedData) {
     stack.push_top_level_scope(db);
 
     for def in file.defs(db) {
-        gather_func(def, &mut stack);
-        resolved.local_count.insert(def.name, 0);
+        gather_func(db, def, &mut stack);
+        resolved.local_count.insert(def.name(db), 0);
     }
 
     for def in file.defs(db) {
@@ -69,8 +69,8 @@ pub fn resolve_file(db: &dyn Db, file: File, resolved: &mut ResolvedData) {
     }
 }
 
-fn gather_func(def: &FnDef, stack: &mut ScopeStack) {
-    stack.add_function(def.name);
+fn gather_func(db: &dyn Db, def: &FnDef, stack: &mut ScopeStack) {
+    stack.add_function(def.name(db));
 }
 
 fn resolve_func(
@@ -81,20 +81,20 @@ fn resolve_func(
     resolved: &mut ResolvedData,
 ) {
     let mut params = vec![];
-    for &(_, ty) in &def.params {
+    for &(_, ty) in &def.params(db) {
         let ty = stack.ty(ty).unwrap();
         params.push(ty);
     }
-    resolved.params.insert(def.name, params);
+    resolved.params.insert(def.name(db), params);
 
     let ret_ty = def
-        .return_type
+        .return_type(db)
         .map(|ty| stack.ty(ty).unwrap())
         .unwrap_or(Type::Void);
-    resolved.return_types.insert(def.name, ret_ty);
+    resolved.return_types.insert(def.name(db), ret_ty);
 
     stack.push(ScopeKind::Function { locals: 0 });
-    resolve_stmts(db, file, def, def.body, stack, resolved);
+    resolve_stmts(db, file, def, def.body(db), stack, resolved);
     stack.pop();
 }
 
@@ -127,7 +127,7 @@ fn resolve_expr(
 
             let local = scopes.top_function_mut().alloc_local();
             scopes.add_local(name, local);
-            *resolved.local_count.get_mut(&def.name).unwrap() += 1;
+            *resolved.local_count.get_mut(&def.name(db)).unwrap() += 1;
             resolved.locals.insert(expr, local);
 
             if let Some(ty) = ty {
