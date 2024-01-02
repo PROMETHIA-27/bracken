@@ -79,7 +79,7 @@ impl<T: Error> From<Vec<T>> for Errors<T> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OneOf<T>(Vec<T>);
 
 impl<T> OneOf<T> {

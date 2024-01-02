@@ -2,43 +2,106 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 use std::hash::Hash;
 use std::ops::Range;
-use std::sync::Arc;
 
-use crate::arena::{Arena, ExtendArena, Id, Interner};
+use thiserror::Error;
+
+use crate::arena::Id;
 use crate::bytecode::Function;
+use crate::error::OneOf;
+use crate::parser::FileParser;
+use crate::Db;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+pub enum ParseError {
+    #[error("invalid token encountered at {0}")]
+    InvalidToken(usize),
+    #[error("encountered unexpected EOF")]
+    UnrecognizedEof,
+    #[error("{0}..{1}: unexpected token {2} encountered; expected {3}")]
+    UnrecognizedToken(usize, usize, String, OneOf<String>),
+    #[error("unexpected extra token encountered")]
+    ExtraToken,
+}
+
+#[salsa::input]
+pub struct SourceFile {
+    #[return_ref]
+    pub text: String,
+}
+
+#[salsa::tracked]
+pub fn parse_file(db: &dyn Db, source: SourceFile) -> Result<File, ParseError> {
+    let file = FileParser::new()
+        .parse(source, db, &source.text(db))
+        .map_err(|err| match err {
+            lalrpop_util::ParseError::InvalidToken { location } => {
+                ParseError::InvalidToken(location)
+            }
+            lalrpop_util::ParseError::UnrecognizedEof { .. } => ParseError::UnrecognizedEof,
+            lalrpop_util::ParseError::UnrecognizedToken {
+                token: (l1, t, l2),
+                expected,
+            } => ParseError::UnrecognizedToken(
+                l1,
+                l2,
+                format!("`{t}`"),
+                OneOf::new(expected).expect("unrecognized token with no expected tokens"),
+            ),
+            lalrpop_util::ParseError::ExtraToken { .. } => ParseError::ExtraToken,
+            _ => unreachable!(),
+        })?;
+    Ok(file)
+}
+
+#[salsa::tracked]
 pub struct File {
-    source: Arc<String>,
-    lines: Vec<usize>,
-    exprs: Arena<Expr>,
-    exprlists: Arena<Vec<Id<Expr>>>,
-    spans: ExtendArena<Expr, (usize, usize)>,
-    // TODO: Move this to a higher level
-    strings: Interner<String>,
-    stmts: Arena<Stmts>,
-    def_ids: BTreeMap<Id<String>, usize>,
-    defs: Vec<FnDef>,
+    #[return_ref]
+    pub source: SourceFile,
+    #[return_ref]
+    pub lines: Vec<usize>,
+    #[return_ref]
+    pub def_ids: BTreeMap<Name, usize>,
+    #[return_ref]
+    pub defs: Vec<FnDef>,
     // TODO: RIGHT NOW: add span info so I can return good errors
 }
 
-impl Drop for File {
-    fn drop(&mut self) {
-        self.defs.clear();
+impl File {
+    pub fn from_defs(db: &dyn Db, source: SourceFile, defs: Vec<FnDef>) -> Self {
+        let lines = source
+            .text(db)
+            .chars()
+            .enumerate()
+            .filter_map(|(i, c)| (c == '\n').then_some(i))
+            .collect();
+        let def_ids = defs
+            .iter()
+            .enumerate()
+            .map(|(i, def)| (def.name, i))
+            .collect();
+
+        Self::new(db, source, lines, def_ids, defs)
+    }
+
+    pub fn offset_to_loc(&self, db: &dyn Db, offset: usize) -> Location {
+        let line = match self.lines(db).binary_search(&offset) {
+            Ok(index) | Err(index) => index - 1,
+        };
+        Location {
+            line,
+            col: offset - self.lines(db)[line],
+        }
+    }
+
+    pub fn def_id(&self, db: &dyn Db, def: Name) -> Id<Function> {
+        Id::new(self.def_ids(db)[&def])
     }
 }
 
-impl Hash for File {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.def_ids.hash(state);
-        self.defs.hash(state);
-    }
-}
-
-impl PartialEq for File {
-    fn eq(&self, other: &Self) -> bool {
-        self.def_ids == other.def_ids && self.defs == other.defs
-    }
+#[salsa::tracked]
+pub struct ExprList {
+    #[return_ref]
+    pub exprs: Vec<Expr>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -53,186 +116,62 @@ impl Display for Location {
     }
 }
 
-impl File {
-    pub fn new(
-        source: Arc<String>,
-        exprs: Arena<Expr>,
-        exprlists: Arena<Vec<Id<Expr>>>,
-        spans: ExtendArena<Expr, (usize, usize)>,
-        mut strings: Interner<String>,
-        stmts: Arena<Stmts>,
-        defs: Vec<FnDef>,
-    ) -> Self {
-        Self::intern_builtin_strings(&mut strings);
-
-        Self {
-            lines: source
-                .chars()
-                .enumerate()
-                .filter_map(|(i, c)| (c == '\n').then_some(i))
-                .collect(),
-            source,
-            def_ids: defs
-                .iter()
-                .enumerate()
-                .map(|(i, def)| (def.name(), i))
-                .collect(),
-            exprs,
-            exprlists,
-            spans,
-            strings,
-            stmts,
-            defs,
-        }
-    }
-
-    fn intern_builtin_strings(strings: &mut Interner<String>) {
-        strings.add("S4".into());
-        strings.add("F4".into());
-    }
-
-    pub fn source(&self) -> &Arc<String> {
-        &self.source
-    }
-
-    pub fn exprs(&self) -> &Arena<Expr> {
-        &self.exprs
-    }
-
-    pub fn expr(&self, expr: Id<Expr>) -> Expr {
-        *self.exprs.get(expr)
-    }
-
-    pub fn exprlist(&self, exprlist: Id<Vec<Id<Expr>>>) -> &Vec<Id<Expr>> {
-        self.exprlists.get(exprlist)
-    }
-
-    pub fn spans(&self) -> &ExtendArena<Expr, (usize, usize)> {
-        &self.spans
-    }
-
-    pub fn span(&self, expr: Id<Expr>) -> Range<usize> {
-        let (s, e) = *self.spans.get_no_resize(expr).unwrap();
-        s..e
-    }
-
-    pub fn offset_to_loc(&self, offset: usize) -> Location {
-        let line = match self.lines.binary_search(&offset) {
-            Ok(index) | Err(index) => index - 1,
-        };
-        Location {
-            line,
-            col: offset - self.lines[line],
-        }
-    }
-
-    pub fn str(&self, string: Id<String>) -> &str {
-        self.strings.get(string)
-    }
-
-    pub fn str_id(&self, string: &str) -> Id<String> {
-        self.strings.get_id(string).unwrap()
-    }
-
-    pub fn stmts(&self, stmts: Id<Stmts>) -> &Stmts {
-        self.stmts.get(stmts)
-    }
-
-    pub fn def(&self, name: Id<String>) -> &FnDef {
-        &self.defs[self.def_ids[&name]]
-    }
-
-    pub fn def_id(&self, name: Id<String>) -> Id<Function> {
-        Id::new(self.def_ids[&name])
-    }
-
-    pub fn defs(&self) -> &[FnDef] {
-        &self.defs
-    }
+#[salsa::interned]
+pub struct Name {
+    #[return_ref]
+    pub text: String,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct FnDef {
-    name: Id<String>,
-    body: Id<Stmts>,
-    params: Vec<(Id<String>, Id<String>)>,
-    ret_ty: Option<Id<String>>,
+    pub name: Name,
+    pub body: Stmts,
+    pub params: Vec<(Name, Name)>,
+    pub return_type: Option<Name>,
 }
 
-impl FnDef {
-    pub fn new(
-        name: Id<String>,
-        body: Id<Stmts>,
-        params: Vec<(Id<String>, Id<String>)>,
-        ret_ty: Option<Id<String>>,
-    ) -> Self {
-        FnDef {
-            name,
-            body,
-            params,
-            ret_ty,
-        }
-    }
-
-    pub fn name(&self) -> Id<String> {
-        self.name
-    }
-
-    pub fn body(&self) -> Id<Stmts> {
-        self.body
-    }
-
-    pub fn params(&self) -> &[(Id<String>, Id<String>)] {
-        &self.params
-    }
-
-    pub fn return_type(&self) -> Option<Id<String>> {
-        self.ret_ty
-    }
+#[salsa::tracked]
+pub struct Stmts {
+    #[return_ref]
+    pub stmts: Vec<Stmt>,
 }
 
-#[derive(Clone, Debug, Hash, PartialEq)]
-pub struct Stmts(Vec<Stmt>);
-
-impl Stmts {
-    pub fn new(stmts: Vec<Stmt>) -> Stmts {
-        Stmts(stmts)
-    }
-
-    pub fn stmts(&self) -> &[Stmt] {
-        &self.0
-    }
-}
-
-#[derive(Clone, Copy, Debug, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum Stmt {
-    Expr(Id<Expr>),
+    Expr(Expr),
 }
 
-#[derive(Clone, Copy, Debug, Hash, PartialEq)]
-pub enum Expr {
+#[salsa::tracked]
+pub struct Expr {
+    pub kind: ExprKind,
+    pub span: Range<usize>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ExprKind {
     Let {
-        name: Id<String>,
-        ty: Option<Id<String>>,
-        value: Id<Expr>,
+        name: Name,
+        ty: Option<Name>,
+        value: Expr,
     },
     Set {
-        name: Id<String>,
-        value: Id<Expr>,
+        name: Name,
+        value: Expr,
     },
-    Name(Id<String>),
+    Name(Name),
     Literal(i32),
-    Plus(Id<Expr>, Id<Expr>),
-    Minus(Id<Expr>, Id<Expr>),
-    Times(Id<Expr>, Id<Expr>),
+    Plus(Expr, Expr),
+    Minus(Expr, Expr),
+    Times(Expr, Expr),
     While {
-        pred: Id<Expr>,
-        body: Id<Stmts>,
+        pred: Expr,
+        body: Stmts,
     },
-    Break(Option<Id<Expr>>),
-    Return(Option<Id<Expr>>),
+    Break(Option<Expr>),
+    Return(Option<Expr>),
     Call {
-        callee: Id<Expr>,
-        params: Id<Vec<Id<Expr>>>,
+        callee: Expr,
+        params: ExprList,
     },
+    // TODO: Parenthesized expr?
 }

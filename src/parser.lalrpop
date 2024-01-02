@@ -1,95 +1,75 @@
 use std::str::FromStr;
-use std::sync::Arc;
 
-use crate::arena::{CellArena, CellExtendArena, CellInterner, Id};
-use crate::ast::{File, FnDef, Expr, Stmt, Stmts};
+use crate::Db;
+use crate::ast::{File, FnDef, Expr, ExprList, ExprKind, Name, SourceFile, Stmt, Stmts};
 
-grammar(
-    source: &Arc<String>,
-    exprs: &CellArena<Expr>, 
-    exprlists: &CellArena<Vec<Id<Expr>>>,
-    strings: &CellInterner<String>, 
-    stmts: &CellArena<Stmts>, 
-    spans: &CellExtendArena<Expr, (usize, usize)>
-);
+grammar(source: SourceFile, db: &dyn Db);
 
-pub File: File = <defs:FnDef*> => File::new(
-    source.clone(),
-    exprs.take(), 
-    exprlists.take(),
-    spans.take(),
-    strings.take(), 
-    stmts.take(), 
-    defs
-);
+pub File: File = <defs:FnDef*> => File::from_defs(db, source.clone(), defs);
 
 pub FnDef: FnDef = 
-    "function" <name:Ident> "(" <params:Comma<(<Ident> ":" <Ident>)>> ")" <ret_ty:("->" <Ident>)?> 
+    "function" <name:Ident> "(" <params:Comma<(<Ident> ":" <Ident>)>> ")" <return_type:("->" <Ident>)?> 
         <body:Stmts> 
-    "end" 
-    => FnDef::new(name, body, params, ret_ty);
+    "end" => 
+        FnDef { name, body, params, return_type };
 
-pub Stmts: Id<Stmts> = <Stmt*> => stmts.push(Stmts::new(<>));
+pub Stmts: Stmts = <Stmt*> => Stmts::new(db, <>);
 
 pub Stmt: Stmt = {
     <Expr> => Stmt::Expr(<>),
 }
 
-pub Expr: Id<Expr> = Spanned<AssignExpr>;
+pub Expr: Expr = AssignExpr;
 
-pub AssignExpr: Id<Expr> = {
-    "let" <name:Ident> <ty:(":" <Ident>)?> "=" <value:Spanned<AssignExpr>> => 
-        exprs.push(Expr::Let { name, ty, value }),
-    <name:Ident> "=" <value:Spanned<AssignExpr>> => exprs.push(Expr::Set { name, value }),
-    Spanned<ValueExpr>,
+pub AssignExpr: Expr = {
+    <l:@L> "let" <name:Ident> <ty:(":" <Ident>)?> "=" <value:AssignExpr> <r:@R> => 
+        Expr::new(db, ExprKind::Let { name, ty, value }, l..r),
+    <l:@L> <name:Ident> "=" <value:AssignExpr> <r:@R> => 
+        Expr::new(db, ExprKind::Set { name, value }, l..r),
+    ValueExpr,
 }
 
-pub ValueExpr: Id<Expr> = {
-    <l:Spanned<ValueExpr>> "+" <r:Spanned<Term>> => exprs.push(Expr::Plus(l, r)),
-    <l:Spanned<ValueExpr>> "-" <r:Spanned<Term>> => exprs.push(Expr::Minus(l, r)),
+pub ValueExpr: Expr = {
+    <l:@L> <lhs:ValueExpr> "+" <rhs:Term> <r:@R> => Expr::new(db, ExprKind::Plus(lhs, rhs), l..r),
+    <l:@L> <lhs:ValueExpr> "-" <rhs:Term> <r:@R> => Expr::new(db, ExprKind::Minus(lhs, rhs), l..r),
     Term,
 }
 
-pub Term: Id<Expr> = {
-    <l:Spanned<Term>> "*" <r:Spanned<Factor>> => exprs.push(Expr::Times(l, r)),
+pub Term: Expr = {
+    <l:@L> <lhs:Term> "*" <rhs:Factor> <r:@R> => Expr::new(db, ExprKind::Times(lhs, rhs), l..r),
     Factor,
 }
 
-pub Factor: Id<Expr> = {
-    Spanned<Return>,
-    Spanned<While>,
-    Spanned<Break>,
-    <callee:Factor> "(" <params:Comma<Expr>> ")" => exprs.push(Expr::Call { 
+pub Factor: Expr = {
+    Return,
+    While,
+    Break,
+    <l:@L> <callee:Factor> "(" <params:Comma<Expr>> ")" <r:@R> => Expr::new(db, ExprKind::Call { 
         callee, 
-        params: exprlists.push(params)
-    }),
-    <Literal> => exprs.push(Expr::Literal(<>)),
-    <Ident> => exprs.push(Expr::Name(<>)),
+        params: ExprList::new(db, params),
+    }, l..r),
+    <l:@L> <lit:Literal> <r:@R> => Expr::new(db, ExprKind::Literal(lit), l..r),
+    <l:@L> <ident:Ident> <r:@R> => Expr::new(db, ExprKind::Name(ident), l..r),
     "{" <Expr> "}" => <>,
 }
 
-pub Return: Id<Expr> =
-    "return" "(" <value:Expr?> ")" => exprs.push(Expr::Return(value));
+pub Return: Expr =
+    <l:@L> "return" "(" <value:Expr?> ")" <r:@R>  => 
+        Expr::new(db, ExprKind::Return(value), l..r);
 
-pub While: Id<Expr> = 
-    "while" <pred:Expr> <body:Stmts> "end" => exprs.push(Expr::While { pred, body });
+pub While: Expr = 
+    <l:@L> "while" <pred:Expr> <body:Stmts> "end" <r:@R> => 
+        Expr::new(db, ExprKind::While { pred, body }, l..r);
 
-pub Break: Id<Expr> = {
-    "break" => exprs.push(Expr::Break(None)),
+pub Break: Expr = {
+    <l:@L> "break" <r:@R> => Expr::new(db, ExprKind::Break(None), l..r),
 }
 
 pub Literal: i32 = <r"[0-9]+"> => i32::from_str(<>).unwrap();
 
-pub Ident: Id<String> = {
-    <r"[a-zA-Z][_a-zA-Z0-9]*"> => strings.add(<>.to_string()),
-    <r"[0-9]+[a-zA-Z][_a-zA-Z0-9]*"> => strings.add(<>.to_string()),
-}
-
-Spanned<T>: T = {
-    <l:@L> <t:T> <r:@R> => {
-        spans.set(t, (l, r));
-        t
-    }
+pub Ident: Name = {
+    <r"[a-zA-Z][_a-zA-Z0-9]*"> => Name::new(db, <>.to_string()),
+    <r"[0-9]+[a-zA-Z][_a-zA-Z0-9]*"> => Name::new(db, <>.to_string()),
 }
 
 Comma<T>: Vec<T> = {
