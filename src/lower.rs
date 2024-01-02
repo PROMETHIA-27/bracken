@@ -43,8 +43,8 @@ pub enum CompileError {
 
 pub fn compile_bytecode(source: String) -> Result<Module, Errors<CompileError>> {
     let db = Database::default();
-    let file = ast::parse_file(&db, SourceFile::new(&db, source)).map_err(CompileError::Parse)?;
-    let resolved = nameres::resolve_names(&db, &file);
+    let file = ast::file_ast(&db, SourceFile::new(&db, source)).map_err(CompileError::Parse)?;
+    let resolved = nameres::resolve_names(&db, file);
     let solved = typecheck::check_types(&db, &file, &resolved).map_err(Errors::into)?;
     let funcs = compile_file(&db, &file, &resolved, &solved);
     Ok(Module { funcs })
@@ -117,9 +117,9 @@ fn compile_func(
         opcodes: vec![],
         labels: vec![OpcodeIndex::UNSET],
         label_pool: vec![],
-        locals: vec![Type::Void; resolved.local_len(def.name)],
-        params: resolved.params(def.name).to_vec(),
-        return_type: resolved.return_type(def.name),
+        locals: vec![Type::Void; resolved.local_len(db, def.name)],
+        params: resolved.params_of(db, def.name).to_vec(),
+        return_type: resolved.return_type(db, def.name),
     };
 
     compile_stmts(db, file, resolved, solved, def.body, &mut func, stack);
@@ -156,18 +156,18 @@ fn compile_expr(
     match expr.kind(db) {
         ExprKind::Let { value, .. } => {
             compile_expr(db, file, resolved, solved, value, func, scopes);
-            let local = resolved.local(expr);
+            let local = resolved.local(db, expr);
             let ty = solved.get(value);
             func.locals[usize::try_from(local).unwrap()] = ty;
             func.push_op(Opcode::StoreLocal(local));
         }
         ExprKind::Set { value, .. } => {
             compile_expr(db, file, resolved, solved, value, func, scopes);
-            let local = resolved.local(expr);
+            let local = resolved.local(db, expr);
             func.push_op(Opcode::StoreLocal(local));
         }
         ExprKind::Name(_) => {
-            let local = resolved.local(expr);
+            let local = resolved.local(db, expr);
             func.push_op(Opcode::LoadLocal(local));
         }
         ExprKind::Literal(constant) => {
@@ -230,7 +230,7 @@ fn compile_expr(
                 compile_expr(db, file, resolved, solved, param, func, scopes);
             }
 
-            let callee = resolved.callee(expr);
+            let callee = resolved.callee(db, expr);
             let callee = file.def_id(db, callee);
             func.push_op(Opcode::Call(callee));
         }

@@ -4,20 +4,18 @@ use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
 
-use crate::arena::Id;
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Module {
     pub funcs: Vec<Function>,
 }
 
 impl Module {
-    pub fn function(&self, index: Id<Function>) -> &Function {
-        &self.funcs[index.index()]
+    pub fn function(&self, index: usize) -> &Function {
+        &self.funcs[index]
     }
 }
 
-#[derive(Clone, Copy, Debug, Hash, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Hash, Serialize, Deserialize, Eq, PartialEq)]
 pub enum Type {
     S4,
     F4,
@@ -253,6 +251,6 @@ pub enum Opcode {
     },
     StoreLocal(u32),
     LoadLocal(u32),
-    Call(Id<Function>),
+    Call(usize),
     Nop,
 }

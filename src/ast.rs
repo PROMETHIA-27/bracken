@@ -5,8 +5,6 @@ use std::ops::Range;
 
 use thiserror::Error;
 
-use crate::arena::Id;
-use crate::bytecode::Function;
 use crate::error::OneOf;
 use crate::parser::FileParser;
 use crate::Db;
@@ -30,9 +28,9 @@ pub struct SourceFile {
 }
 
 #[salsa::tracked]
-pub fn parse_file(db: &dyn Db, source: SourceFile) -> Result<File, ParseError> {
+pub fn file_ast(db: &dyn Db, source: SourceFile) -> Result<File, ParseError> {
     let file = FileParser::new()
-        .parse(source, db, &source.text(db))
+        .parse(source, db, source.text(db))
         .map_err(|err| match err {
             lalrpop_util::ParseError::InvalidToken { location } => {
                 ParseError::InvalidToken(location)
@@ -93,8 +91,8 @@ impl File {
         }
     }
 
-    pub fn def_id(&self, db: &dyn Db, def: Name) -> Id<Function> {
-        Id::new(self.def_ids(db)[&def])
+    pub fn def_id(&self, db: &dyn Db, def: Name) -> usize {
+        self.def_ids(db)[&def]
     }
 }
 

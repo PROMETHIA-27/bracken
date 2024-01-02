@@ -244,8 +244,8 @@ fn compile_block(
             }
             Opcode::Call(func) => {
                 // TODO: Cache refs per function to clone less
-                let name = compiled.names[func.index()].clone();
-                let sig = compiled.signatures[func.index()].clone();
+                let name = compiled.names[func].clone();
+                let sig = compiled.signatures[func].clone();
                 let nameref = b.func.declare_imported_user_function(name);
                 let sigref = b.import_signature(sig);
                 let funcref = b.import_function(ExtFuncData {

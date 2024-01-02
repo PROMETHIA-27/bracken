@@ -1,6 +1,5 @@
 use lalrpop_util::lalrpop_mod;
 
-pub mod arena;
 pub mod ast;
 pub mod bytecode;
 pub mod error;
@@ -15,10 +14,12 @@ pub struct Jar(
     ast::SourceFile,
     ast::File,
     ast::Expr,
-    ast::parse_file,
+    ast::file_ast,
     ast::Stmts,
     ast::Name,
     ast::ExprList,
+    nameres::Resolved,
+    nameres::resolve_names,
 );
 
 pub trait Db: salsa::DbWithJar<Jar> {}

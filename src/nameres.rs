@@ -4,62 +4,58 @@ use crate::ast::{Expr, ExprKind, File, FnDef, Name, Stmt, Stmts};
 use crate::bytecode::Type;
 use crate::Db;
 
-#[derive(Clone, Debug)]
+#[salsa::tracked]
 pub struct Resolved {
+    #[return_ref]
+    data: ResolvedData,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ResolvedData {
     locals: HashMap<Expr, u32>,
     local_count: HashMap<Name, usize>,
     types: HashMap<Expr, Type>,
     params: HashMap<Name, Vec<Type>>,
     return_types: HashMap<Name, Type>,
-    callee: HashMap<Expr, Name>,
+    callees: HashMap<Expr, Name>,
 }
 
 impl Resolved {
-    fn new() -> Self {
-        Self {
-            locals: HashMap::new(),
-            local_count: HashMap::new(),
-            types: HashMap::new(),
-            params: HashMap::new(),
-            return_types: HashMap::new(),
-            callee: HashMap::new(),
-        }
+    pub fn local(self, db: &dyn Db, expr: Expr) -> u32 {
+        self.data(db).locals[&expr]
     }
 
-    pub fn local(&self, expr: Expr) -> u32 {
-        self.locals[&expr]
+    pub fn local_len(self, db: &dyn Db, func: Name) -> usize {
+        self.data(db).local_count[&func]
     }
 
-    pub fn local_len(&self, func: Name) -> usize {
-        self.local_count[&func]
+    pub fn typ(self, db: &dyn Db, expr: Expr) -> Type {
+        self.data(db).types[&expr]
     }
 
-    pub fn typ(&self, expr: Expr) -> Type {
-        self.types[&expr]
+    pub fn params_of(self, db: &dyn Db, func: Name) -> &[Type] {
+        &self.data(db).params[&func]
     }
 
-    pub fn params(&self, func: Name) -> &[Type] {
-        &self.params[&func]
+    pub fn return_type(self, db: &dyn Db, func: Name) -> Type {
+        self.data(db).return_types[&func]
     }
 
-    pub fn return_type(&self, func: Name) -> Type {
-        self.return_types[&func]
-    }
-
-    pub fn callee(&self, call: Expr) -> Name {
-        self.callee[&call]
+    pub fn callee(self, db: &dyn Db, expr: Expr) -> Name {
+        self.data(db).callees[&expr]
     }
 }
 
-pub fn resolve_names(db: &dyn Db, file: &File) -> Resolved {
-    let mut resolved = Resolved::new();
+#[salsa::tracked]
+pub fn resolve_names(db: &dyn Db, file: File) -> Resolved {
+    let mut resolved = ResolvedData::default();
 
     resolve_file(db, file, &mut resolved);
 
-    resolved
+    Resolved::new(db, resolved)
 }
 
-pub fn resolve_file(db: &dyn Db, file: &File, resolved: &mut Resolved) {
+pub fn resolve_file(db: &dyn Db, file: File, resolved: &mut ResolvedData) {
     let mut stack = ScopeStack::new();
     stack.push_top_level_scope(db);
 
@@ -79,10 +75,10 @@ fn gather_func(def: &FnDef, stack: &mut ScopeStack) {
 
 fn resolve_func(
     db: &dyn Db,
-    file: &File,
+    file: File,
     def: &FnDef,
     stack: &mut ScopeStack,
-    resolved: &mut Resolved,
+    resolved: &mut ResolvedData,
 ) {
     let mut params = vec![];
     for &(_, ty) in &def.params {
@@ -104,11 +100,11 @@ fn resolve_func(
 
 fn resolve_stmts(
     db: &dyn Db,
-    file: &File,
+    file: File,
     def: &FnDef,
     stmts: Stmts,
     scopes: &mut ScopeStack,
-    resolved: &mut Resolved,
+    resolved: &mut ResolvedData,
 ) {
     for stmt in stmts.stmts(db).iter().copied() {
         match stmt {
@@ -119,11 +115,11 @@ fn resolve_stmts(
 
 fn resolve_expr(
     db: &dyn Db,
-    file: &File,
+    file: File,
     def: &FnDef,
     expr: Expr,
     scopes: &mut ScopeStack,
-    resolved: &mut Resolved,
+    resolved: &mut ResolvedData,
 ) {
     match expr.kind(db) {
         ExprKind::Let { name, ty, value } => {
@@ -179,7 +175,7 @@ fn resolve_expr(
             match callee.kind(db) {
                 ExprKind::Name(name) => {
                     scopes.function(name).expect("unbound name");
-                    resolved.callee.insert(expr, name);
+                    resolved.callees.insert(expr, name);
                 }
                 _ => todo!(),
             }

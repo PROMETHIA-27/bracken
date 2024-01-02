@@ -215,11 +215,11 @@ fn check_expr_types(
             solved.must_be(expr, Type::Void).unwrap();
 
             if ty.is_some() {
-                let ty = resolved.typ(expr);
+                let ty = resolved.typ(db, expr);
                 solved.must_be(value, ty).unwrap();
             }
 
-            let local = resolved.local(expr);
+            let local = resolved.local(db, expr);
             match locals.get_or_init(local, value) {
                 Some(other) => {
                     constraints.push(Constraint::Same(value, other));
@@ -232,7 +232,7 @@ fn check_expr_types(
         ExprKind::Set { value, .. } => {
             solved.must_be(expr, Type::Void).unwrap();
 
-            let local = resolved.local(expr);
+            let local = resolved.local(db, expr);
             match locals.get_or_init(local, value) {
                 Some(other) => {
                     constraints.push(Constraint::Same(value, other));
@@ -243,7 +243,7 @@ fn check_expr_types(
             check_expr_types(db, file, def, value, resolved, solved, constraints, locals);
         }
         ExprKind::Name(_) => {
-            let local = resolved.local(expr);
+            let local = resolved.local(db, expr);
             match locals.get_or_init(local, expr) {
                 Some(other) => {
                     constraints.push(Constraint::Same(expr, other));
@@ -280,7 +280,7 @@ fn check_expr_types(
             solved.must_be(expr, Type::Void).unwrap();
 
             if let Some(value) = value {
-                let ret_ty = resolved.return_type(def.name);
+                let ret_ty = resolved.return_type(db, def.name);
                 solved.must_be(value, ret_ty).unwrap();
                 check_expr_types(db, file, def, value, resolved, solved, constraints, locals);
             }
@@ -288,8 +288,8 @@ fn check_expr_types(
         ExprKind::Call { callee, params } => {
             // TODO: type checking the callee gonna be funky
             solved.must_be(callee, Type::Function).unwrap();
-            let func = resolved.callee(expr);
-            let param_tys = resolved.params(func);
+            let func = resolved.callee(db, expr);
+            let param_tys = resolved.params_of(db, func);
 
             let params = params.exprs(db);
             assert_eq!(params.len(), param_tys.len());
