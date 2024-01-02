@@ -6,7 +6,7 @@ use crate::bytecode::{Function, LabelIndex, Module, Opcode, OpcodeIndex, Type};
 use crate::error::Errors;
 use crate::nameres::{self, Resolved};
 use crate::typecheck::{self, SolvedTypes, TyCheckError};
-use crate::{Database, Db};
+use crate::Db;
 
 #[derive(Clone, Debug, Error)]
 pub enum Error {
@@ -22,8 +22,8 @@ pub enum SerError {
     Failed,
 }
 
-pub fn compile(source: String) -> Result<Vec<u8>, Errors<Error>> {
-    let module = compile_bytecode(source)
+pub fn compile(db: &dyn Db, source: String) -> Result<Vec<u8>, Errors<Error>> {
+    let module = compile_bytecode(db, SourceFile::new(db, source))
         .map_err(|errs| errs.into_iter().map(Error::from).collect::<Vec<_>>())?;
     Ok(DefaultOptions::new()
         .with_varint_encoding()
@@ -33,7 +33,7 @@ pub fn compile(source: String) -> Result<Vec<u8>, Errors<Error>> {
         .map_err(Error::Serialize)?)
 }
 
-#[derive(Clone, Debug, Error)]
+#[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum CompileError {
     #[error(transparent)]
     Parse(#[from] ParseError),
@@ -41,12 +41,12 @@ pub enum CompileError {
     TyCheck(#[from] TyCheckError),
 }
 
-pub fn compile_bytecode(source: String) -> Result<Module, Errors<CompileError>> {
-    let db = Database::default();
-    let file = ast::file_ast(&db, SourceFile::new(&db, source)).map_err(CompileError::Parse)?;
-    let resolved = nameres::resolve_names(&db, file);
-    let solved = typecheck::check_types(&db, file, resolved).map_err(Errors::into)?;
-    let funcs = compile_file(&db, file, resolved, solved);
+#[salsa::tracked]
+pub fn compile_bytecode(db: &dyn Db, source: SourceFile) -> Result<Module, Errors<CompileError>> {
+    let file = ast::file_ast(db, source).map_err(CompileError::Parse)?;
+    let resolved = nameres::resolve_names(db, file);
+    let solved = typecheck::check_types(db, file, resolved).map_err(Errors::into)?;
+    let funcs = compile_file(db, file, resolved, solved);
     Ok(Module { funcs })
 }
 
@@ -101,7 +101,7 @@ pub fn compile_file(
     file.defs(db)
         .iter()
         .map(|def| compile_func(db, file, resolved, solved, def, &mut stack))
-        .collect::<Vec<Function>>()
+        .collect()
 }
 
 fn compile_func(

@@ -4,7 +4,7 @@ use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Module {
     pub funcs: Vec<Function>,
 }
@@ -43,7 +43,7 @@ impl Type {
     }
 }
 
-#[derive(Clone, Debug, Hash, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Eq, Serialize, Deserialize, PartialEq)]
 pub struct Function {
     pub name: String,
     pub opcodes: Vec<Opcode>,
@@ -228,7 +228,7 @@ impl PartialEq for BinaryF64 {
 
 impl Eq for BinaryF64 {}
 
-#[derive(Clone, Copy, Debug, Hash, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Serialize, Deserialize, PartialEq)]
 pub enum Opcode {
     LiteralS1(i8),
     LiteralS2(i16),

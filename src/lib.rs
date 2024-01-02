@@ -22,6 +22,7 @@ pub struct Jar(
     nameres::resolve_names,
     typecheck::SolvedTypes,
     typecheck::check_types,
+    lower::compile_bytecode,
 );
 
 pub trait Db: salsa::DbWithJar<Jar> {}
