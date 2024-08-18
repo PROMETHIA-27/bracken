@@ -3,8 +3,10 @@ use std::fmt::Display;
 use std::hash::Hash;
 use std::ops::Range;
 
+use cranelift_entity::PrimaryMap;
 use thiserror::Error;
 
+use crate::bytecode::FunctionId;
 use crate::error::OneOf;
 use crate::parser::FileParser;
 use crate::Db;
@@ -57,9 +59,9 @@ pub struct File {
     #[return_ref]
     pub lines: Vec<usize>,
     #[return_ref]
-    pub def_ids: BTreeMap<Name, usize>,
+    pub def_ids: BTreeMap<Name, FunctionId>,
     #[return_ref]
-    pub defs: Vec<FnDef>,
+    pub defs: PrimaryMap<FunctionId, FnDef>,
     // TODO: RIGHT NOW: add span info so I can return good errors
 }
 
@@ -71,11 +73,8 @@ impl File {
             .enumerate()
             .filter_map(|(i, c)| (c == '\n').then_some(i))
             .collect();
-        let def_ids = defs
-            .iter()
-            .enumerate()
-            .map(|(i, def)| (def.name(db), i))
-            .collect();
+        let defs: PrimaryMap<_, _> = defs.into_iter().collect();
+        let def_ids = defs.iter().map(|(i, def)| (def.name(db), i)).collect();
 
         Self::new(db, source, lines, def_ids, defs)
     }
@@ -90,7 +89,7 @@ impl File {
         }
     }
 
-    pub fn def_id(&self, db: &dyn Db, def: Name) -> usize {
+    pub fn def_id(&self, db: &dyn Db, def: Name) -> FunctionId {
         self.def_ids(db)[&def]
     }
 }
@@ -123,6 +122,7 @@ pub struct Name {
 pub struct FnDef {
     pub name: Name,
     pub body: Stmts,
+    #[return_ref]
     pub params: Vec<(Name, Name)>,
     pub return_type: Option<Name>,
 }

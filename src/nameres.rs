@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::ast::{Expr, ExprKind, File, FnDef, Name, Stmt, Stmts};
-use crate::bytecode::Type;
+use crate::bytecode::{Type, TypeId};
 use crate::Db;
 
 #[salsa::tracked]
@@ -14,9 +14,9 @@ pub struct Resolved {
 pub struct ResolvedData {
     locals: HashMap<Expr, u32>,
     local_count: HashMap<Name, usize>,
-    types: HashMap<Expr, Type>,
-    params: HashMap<Name, Vec<Type>>,
-    return_types: HashMap<Name, Type>,
+    types: HashMap<Expr, TypeId>,
+    params: HashMap<Name, Vec<TypeId>>,
+    return_types: HashMap<Name, TypeId>,
     callees: HashMap<Expr, Name>,
 }
 
@@ -29,15 +29,15 @@ impl Resolved {
         self.data(db).local_count[&func]
     }
 
-    pub fn typ(self, db: &dyn Db, expr: Expr) -> Type {
+    pub fn typ(self, db: &dyn Db, expr: Expr) -> TypeId {
         self.data(db).types[&expr]
     }
 
-    pub fn params_of(self, db: &dyn Db, func: Name) -> &[Type] {
+    pub fn params_of(self, db: &dyn Db, func: Name) -> &[TypeId] {
         &self.data(db).params[&func]
     }
 
-    pub fn return_type(self, db: &dyn Db, func: Name) -> Type {
+    pub fn return_type(self, db: &dyn Db, func: Name) -> TypeId {
         self.data(db).return_types[&func]
     }
 
@@ -50,12 +50,6 @@ impl Resolved {
 pub fn resolve_names(db: &dyn Db, file: File) -> Resolved {
     let mut resolved = ResolvedData::default();
 
-    resolve_file(db, file, &mut resolved);
-
-    Resolved::new(db, resolved)
-}
-
-pub fn resolve_file(db: &dyn Db, file: File, resolved: &mut ResolvedData) {
     let mut stack = ScopeStack::new();
     stack.push_top_level_scope(db);
 
@@ -65,23 +59,19 @@ pub fn resolve_file(db: &dyn Db, file: File, resolved: &mut ResolvedData) {
     }
 
     for def in file.defs(db) {
-        resolve_func(db, file, def, &mut stack, resolved);
+        resolve_func(db, def, &mut stack, &mut resolved);
     }
+
+    Resolved::new(db, resolved)
 }
 
 fn gather_func(db: &dyn Db, def: &FnDef, stack: &mut ScopeStack) {
     stack.add_function(def.name(db));
 }
 
-fn resolve_func(
-    db: &dyn Db,
-    file: File,
-    def: &FnDef,
-    stack: &mut ScopeStack,
-    resolved: &mut ResolvedData,
-) {
+fn resolve_func(db: &dyn Db, def: &FnDef, stack: &mut ScopeStack, resolved: &mut ResolvedData) {
     let mut params = vec![];
-    for &(_, ty) in &def.params(db) {
+    for &(_, ty) in def.params(db) {
         let ty = stack.ty(ty).unwrap();
         params.push(ty);
     }
@@ -90,17 +80,16 @@ fn resolve_func(
     let ret_ty = def
         .return_type(db)
         .map(|ty| stack.ty(ty).unwrap())
-        .unwrap_or(Type::Void);
+        .unwrap_or(Type::unit());
     resolved.return_types.insert(def.name(db), ret_ty);
 
     stack.push(ScopeKind::Function { locals: 0 });
-    resolve_stmts(db, file, def, def.body(db), stack, resolved);
+    resolve_stmts(db, def, def.body(db), stack, resolved);
     stack.pop();
 }
 
 fn resolve_stmts(
     db: &dyn Db,
-    file: File,
     def: &FnDef,
     stmts: Stmts,
     scopes: &mut ScopeStack,
@@ -108,14 +97,13 @@ fn resolve_stmts(
 ) {
     for stmt in stmts.stmts(db).iter().copied() {
         match stmt {
-            Stmt::Expr(expr) => resolve_expr(db, file, def, expr, scopes, resolved),
+            Stmt::Expr(expr) => resolve_expr(db, def, expr, scopes, resolved),
         }
     }
 }
 
 fn resolve_expr(
     db: &dyn Db,
-    file: File,
     def: &FnDef,
     expr: Expr,
     scopes: &mut ScopeStack,
@@ -123,7 +111,7 @@ fn resolve_expr(
 ) {
     match expr.kind(db) {
         ExprKind::Let { name, ty, value } => {
-            resolve_expr(db, file, def, value, scopes, resolved);
+            resolve_expr(db, def, value, scopes, resolved);
 
             let local = scopes.top_function_mut().alloc_local();
             scopes.add_local(name, local);
@@ -136,7 +124,7 @@ fn resolve_expr(
             }
         }
         ExprKind::Set { name, value } => {
-            resolve_expr(db, file, def, value, scopes, resolved);
+            resolve_expr(db, def, value, scopes, resolved);
             let local = scopes.local(name).expect("unbound name");
             resolved.locals.insert(expr, local);
         }
@@ -148,19 +136,19 @@ fn resolve_expr(
             ScopeItem::Function => (),
         },
         ExprKind::Plus(lhs, rhs) | ExprKind::Minus(lhs, rhs) | ExprKind::Times(lhs, rhs) => {
-            resolve_expr(db, file, def, lhs, scopes, resolved);
-            resolve_expr(db, file, def, rhs, scopes, resolved);
+            resolve_expr(db, def, lhs, scopes, resolved);
+            resolve_expr(db, def, rhs, scopes, resolved);
         }
         ExprKind::While { pred, body } => {
-            resolve_expr(db, file, def, pred, scopes, resolved);
+            resolve_expr(db, def, pred, scopes, resolved);
 
             scopes.push(ScopeKind::Loop);
-            resolve_stmts(db, file, def, body, scopes, resolved);
+            resolve_stmts(db, def, body, scopes, resolved);
             scopes.pop();
         }
         ExprKind::Break(val) | ExprKind::Return(val) => {
             if let Some(val) = val {
-                resolve_expr(db, file, def, val, scopes, resolved);
+                resolve_expr(db, def, val, scopes, resolved);
             }
         }
         ExprKind::Literal(_) => (),
@@ -169,7 +157,7 @@ fn resolve_expr(
             // resolve_expr(file, def, callee, scopes, resolved);
 
             for &param in params.exprs(db) {
-                resolve_expr(db, file, def, param, scopes, resolved);
+                resolve_expr(db, def, param, scopes, resolved);
             }
 
             match callee.kind(db) {
@@ -186,7 +174,7 @@ fn resolve_expr(
 #[derive(Clone, Copy, Debug)]
 pub enum ScopeItem {
     Local(u32),
-    Type(Type),
+    Type(TypeId),
     Function,
 }
 
@@ -198,7 +186,7 @@ impl ScopeItem {
         }
     }
 
-    pub fn ty(&self) -> Type {
+    pub fn ty(&self) -> TypeId {
         match self {
             ScopeItem::Type(ty) => *ty,
             _ => panic!(),
@@ -271,7 +259,7 @@ impl ScopeStack {
         self.item(name).map(ScopeItem::local)
     }
 
-    pub fn ty(&self, name: Name) -> Option<Type> {
+    pub fn ty(&self, name: Name) -> Option<TypeId> {
         self.item(name).map(ScopeItem::ty)
     }
 
@@ -283,7 +271,7 @@ impl ScopeStack {
         self.items.push((name, ScopeItem::Local(local)));
     }
 
-    pub fn add_type(&mut self, name: Name, ty: Type) {
+    pub fn add_type(&mut self, name: Name, ty: TypeId) {
         self.items.push((name, ScopeItem::Type(ty)));
     }
 

@@ -27,6 +27,8 @@ bincode = "1.3.3"
 serde = { version = "1.0.193", features = ["derive"] }
 thiserror = "1.0.50"
 salsa = { git = "https://github.com/salsa-rs/salsa.git", version = "0.1.0", package = "salsa-2022" }
+cranelift-entity = { version = "0.103.0", features = ["serde", "enable-serde"] }
+smallvec = { version = "1.11.2", features = ["union", "const_generics"] }
 
 [dependencies.lalrpop-util]
 version = "0.20"

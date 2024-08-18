@@ -105,6 +105,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "cranelift-codegen",
+ "cranelift-entity 0.103.0",
  "cranelift-frontend",
  "cranelift-jit",
  "cranelift-module",
@@ -112,6 +113,7 @@ dependencies = [
  "lalrpop-util",
  "salsa-2022",
  "serde",
+ "smallvec",
  "thiserror",
 ]
 
@@ -133,7 +135,7 @@ version = "0.102.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8e7e56668d2263f92b691cb9e4a2fcb186ca0384941fe420484322fa559c3329"
 dependencies = [
- "cranelift-entity",
+ "cranelift-entity 0.102.1",
 ]
 
 [[package]]
@@ -147,7 +149,7 @@ dependencies = [
  "cranelift-codegen-meta",
  "cranelift-codegen-shared",
  "cranelift-control",
- "cranelift-entity",
+ "cranelift-entity 0.102.1",
  "cranelift-isle",
  "gimli",
  "hashbrown 0.14.3",
@@ -188,6 +190,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdb25f573701284fe2bcf88209d405342125df00764b396c923e11eafc94d892"
 
 [[package]]
+name = "cranelift-entity"
+version = "0.103.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44e3ee532fc4776c69bcedf7e62f9632cbb3f35776fa9a525cdade3195baa3f7"
+dependencies = [
+ "serde",
+ "serde_derive",
+]
+
+[[package]]
 name = "cranelift-frontend"
 version = "0.102.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -214,7 +226,7 @@ dependencies = [
  "anyhow",
  "cranelift-codegen",
  "cranelift-control",
- "cranelift-entity",
+ "cranelift-entity 0.102.1",
  "cranelift-module",
  "cranelift-native",
  "libc",

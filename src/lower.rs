@@ -41,12 +41,9 @@ pub enum CompileError {
     TyCheck(#[from] TyCheckError),
 }
 
-#[salsa::tracked]
 pub fn compile_bytecode(db: &dyn Db, source: SourceFile) -> Result<Module, Errors<CompileError>> {
     let file = ast::file_ast(db, source).map_err(CompileError::Parse)?;
-    let resolved = nameres::resolve_names(db, file);
-    let solved = typecheck::check_types(db, file, resolved).map_err(Errors::into)?;
-    let funcs = compile_file(db, file, resolved, solved);
+    let funcs = compile_file(db, file);
     Ok(Module { funcs })
 }
 
@@ -89,18 +86,18 @@ impl LabelScope {
     }
 }
 
-pub fn compile_file(
-    db: &dyn Db,
-    file: File,
-    resolved: Resolved,
-    solved: SolvedTypes,
-) -> Vec<Function> {
+#[salsa::tracked]
+pub fn compile_file(db: &dyn Db, file: File) -> Vec<Function> {
     let mut stack = LabelScopeStack::new();
     stack.push(LabelScope::top_level());
 
+    let resolved = nameres::resolve_names(db, file);
+    // TODO: Accumulate errors
+    let solved = typecheck::check_types(db, file).unwrap();
+
     file.defs(db)
         .iter()
-        .map(|def| compile_func(db, file, resolved, solved, def, &mut stack))
+        .map(|def| compile_func(db, file, resolved, solved, *def, &mut stack))
         .collect()
 }
 
@@ -109,7 +106,7 @@ fn compile_func(
     file: File,
     resolved: Resolved,
     solved: SolvedTypes,
-    def: &FnDef,
+    def: FnDef,
     stack: &mut LabelScopeStack,
 ) -> Function {
     let name = def.name(db);
@@ -118,7 +115,7 @@ fn compile_func(
         opcodes: vec![],
         labels: vec![OpcodeIndex::UNSET],
         label_pool: vec![],
-        locals: vec![Type::Void; resolved.local_len(db, name)],
+        locals: vec![Type::Invalid; resolved.local_len(db, name)],
         params: resolved.params_of(db, name).to_vec(),
         return_type: resolved.return_type(db, name),
     };

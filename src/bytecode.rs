@@ -2,45 +2,81 @@ use std::collections::HashMap;
 use std::hash::Hash;
 use std::ops::Range;
 
+use cranelift_codegen as cc;
+use cranelift_entity::{entity_impl, EntityList, ListPool, PrimaryMap};
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FunctionId(u32);
+entity_impl!(FunctionId);
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TypeId(u32);
+entity_impl!(TypeId);
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Module {
-    pub funcs: Vec<Function>,
+    pub funcs: PrimaryMap<FunctionId, Function>,
+    pub types: PrimaryMap<TypeId, Type>,
+    pub type_pool: ListPool<TypeId>,
 }
 
 impl Module {
-    pub fn function(&self, index: usize) -> &Function {
+    pub fn function(&self, index: FunctionId) -> &Function {
         &self.funcs[index]
     }
 }
 
-#[derive(Clone, Copy, Debug, Hash, Serialize, Deserialize, Eq, PartialEq)]
+impl AsRef<ListPool<TypeId>> for Module {
+    fn as_ref(&self) -> &ListPool<TypeId> {
+        &self.type_pool
+    }
+}
+
+impl AsMut<ListPool<TypeId>> for Module {
+    fn as_mut(&mut self) -> &mut ListPool<TypeId> {
+        &mut self.type_pool
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Type {
     S4,
     F4,
-    Void,
     Function,
+    Tuple(EntityList<TypeId>),
+    Invalid,
 }
 
 impl Type {
-    pub fn clif_type(self) -> Option<cranelift_codegen::ir::Type> {
+    pub fn unit() -> Self {
+        Self::Tuple(EntityList::new())
+    }
+
+    pub fn clif_types(self, module: &Module, vec: &mut SmallVec<[cc::ir::Type; 8]>) {
         match self {
-            Type::S4 => Some(cranelift_codegen::ir::types::I32),
-            Type::F4 => Some(cranelift_codegen::ir::types::F32),
-            Type::Void | Type::Function => None,
+            Type::S4 => vec.push(cc::ir::types::I32),
+            Type::F4 => vec.push(cc::ir::types::F32),
+            Type::Function => (),
+            Type::Tuple(fields) => {
+                let fields = fields.as_slice(module.as_ref());
+                for ty in fields.iter().map(|id| module.types.get(*id).unwrap()) {
+                    ty.clif_types(module, vec);
+                }
+            }
         }
     }
 
-    pub fn from_clif_type(ty: cranelift_codegen::ir::Type) -> Option<Self> {
-        if ty == cranelift_codegen::ir::types::I32 {
-            Some(Type::S4)
-        } else if ty == cranelift_codegen::ir::types::F32 {
-            Some(Type::F4)
-        } else {
-            None
-        }
-    }
+    // pub fn from_clif_type(ty: cc::ir::Type) -> Option<Self> {
+    //     if ty == cc::ir::types::I32 {
+    //         Some(Type::S4)
+    //     } else if ty == cc::ir::types::F32 {
+    //         Some(Type::F4)
+    //     } else {
+    //         None
+    //     }
+    // }
 }
 
 #[derive(Clone, Debug, Eq, Serialize, Deserialize, PartialEq)]
@@ -49,9 +85,9 @@ pub struct Function {
     pub opcodes: Vec<Opcode>,
     pub labels: Vec<OpcodeIndex>,
     pub label_pool: Vec<LabelIndex>,
-    pub locals: Vec<Type>,
-    pub params: Vec<Type>,
-    pub return_type: Type,
+    pub locals: Vec<TypeId>,
+    pub params: Vec<TypeId>,
+    pub return_type: TypeId,
 }
 
 impl Function {
@@ -63,7 +99,7 @@ impl Function {
         &self.opcodes
     }
 
-    pub fn local(&self, local: u32) -> Type {
+    pub fn local(&self, local: u32) -> TypeId {
         self.locals[usize::try_from(local).unwrap()]
     }
 }
@@ -251,6 +287,6 @@ pub enum Opcode {
     },
     StoreLocal(u32),
     LoadLocal(u32),
-    Call(usize),
+    Call(FunctionId),
     Nop,
 }

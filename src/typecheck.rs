@@ -4,9 +4,9 @@ use std::ops::Range;
 use thiserror::Error;
 
 use crate::ast::{Expr, ExprKind, File, FnDef, Location, Stmt, Stmts};
-use crate::bytecode::Type;
+use crate::bytecode::{Type, TypeId};
 use crate::error::Errors;
-use crate::nameres::Resolved;
+use crate::nameres::{self, Resolved};
 use crate::Db;
 
 #[salsa::tracked]
@@ -16,11 +16,11 @@ pub struct SolvedTypes {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SolvedTypesData {
-    tys: HashMap<Expr, Type>,
+    tys: HashMap<Expr, TypeId>,
 }
 
 impl SolvedTypesData {
-    pub fn get(&self, expr: Expr) -> Type {
+    pub fn get(&self, expr: Expr) -> TypeId {
         *self
             .tys
             .get(&expr)
@@ -29,11 +29,11 @@ impl SolvedTypesData {
 }
 
 trait SolvedMapExt {
-    fn must_be(&mut self, id: Expr, value: Type) -> Result<(), ()>;
+    fn must_be(&mut self, id: Expr, value: TypeId) -> Result<(), ()>;
 }
 
-impl SolvedMapExt for HashMap<Expr, Type> {
-    fn must_be(&mut self, id: Expr, value: Type) -> Result<(), ()> {
+impl SolvedMapExt for HashMap<Expr, TypeId> {
+    fn must_be(&mut self, id: Expr, value: TypeId) -> Result<(), ()> {
         match self.get(&id) {
             Some(old) => {
                 if old != &value {
@@ -90,15 +90,13 @@ impl LocalValues {
 }
 
 #[salsa::tracked]
-pub fn check_types(
-    db: &dyn Db,
-    file: File,
-    resolved: Resolved,
-) -> Result<SolvedTypes, Errors<TyCheckError>> {
+pub fn check_types(db: &dyn Db, file: File) -> Result<SolvedTypes, Errors<TyCheckError>> {
     let mut solved = HashMap::new();
     let mut errors = Errors::new();
 
-    for def in file.defs(db) {
+    let resolved = nameres::resolve_names(db, file);
+
+    for def in file.defs(db).values() {
         check_fn_types(db, file, def, resolved, &mut solved, &mut errors);
     }
 
@@ -114,7 +112,7 @@ fn check_fn_types(
     file: File,
     def: &FnDef,
     resolved: Resolved,
-    solved: &mut HashMap<Expr, Type>,
+    solved: &mut HashMap<Expr, TypeId>,
     errors: &mut Errors<TyCheckError>,
 ) {
     let mut constraints = vec![];
@@ -194,7 +192,7 @@ fn check_stmts_types(
     def: &FnDef,
     stmts: Stmts,
     resolved: Resolved,
-    solved: &mut HashMap<Expr, Type>,
+    solved: &mut HashMap<Expr, TypeId>,
     constraints: &mut Vec<Constraint>,
     locals: &mut LocalValues,
 ) {
@@ -213,13 +211,13 @@ fn check_expr_types(
     def: &FnDef,
     expr: Expr,
     resolved: Resolved,
-    solved: &mut HashMap<Expr, Type>,
+    solved: &mut HashMap<Expr, TypeId>,
     constraints: &mut Vec<Constraint>,
     locals: &mut LocalValues,
 ) {
     match expr.kind(db) {
         ExprKind::Let { ty, value, .. } => {
-            solved.must_be(expr, Type::Void).unwrap();
+            solved.must_be(expr, Type::unit()).unwrap();
 
             if ty.is_some() {
                 let ty = resolved.typ(db, expr);
@@ -237,7 +235,7 @@ fn check_expr_types(
             check_expr_types(db, file, def, value, resolved, solved, constraints, locals);
         }
         ExprKind::Set { value, .. } => {
-            solved.must_be(expr, Type::Void).unwrap();
+            solved.must_be(expr, Type::unit()).unwrap();
 
             let local = resolved.local(db, expr);
             match locals.get_or_init(local, value) {
@@ -269,7 +267,7 @@ fn check_expr_types(
             check_expr_types(db, file, def, rhs, resolved, solved, constraints, locals);
         }
         ExprKind::While { pred, body } => {
-            solved.must_be(expr, Type::Void).unwrap();
+            solved.must_be(expr, Type::unit()).unwrap();
             solved.must_be(pred, Type::S4).unwrap();
 
             check_expr_types(db, file, def, pred, resolved, solved, constraints, locals);
@@ -277,14 +275,14 @@ fn check_expr_types(
         }
         ExprKind::Break(value) => {
             // TODO: Resolve scopes to track that sameness
-            solved.must_be(expr, Type::Void).unwrap();
+            solved.must_be(expr, Type::unit()).unwrap();
 
             if let Some(value) = value {
                 check_expr_types(db, file, def, value, resolved, solved, constraints, locals);
             }
         }
         ExprKind::Return(value) => {
-            solved.must_be(expr, Type::Void).unwrap();
+            solved.must_be(expr, Type::unit()).unwrap();
 
             if let Some(value) = value {
                 let ret_ty = resolved.return_type(db, def.name(db));
@@ -312,7 +310,7 @@ fn check_expr_types(
 /// - (unsolved, unsolved)
 /// - (solved, unsolved)
 /// - (solved, solved)
-fn order_by_solved(x: Expr, y: Expr, solved: &mut HashMap<Expr, Type>) -> (Expr, Expr) {
+fn order_by_solved(x: Expr, y: Expr, solved: &mut HashMap<Expr, TypeId>) -> (Expr, Expr) {
     if solved.get(&x).is_some() {
         (x, y)
     } else {
