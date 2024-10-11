@@ -10,4 +10,6 @@
 //     Ok(())
 // }
 
-fn main() {}
+fn main() {
+    bracken::test();
+}

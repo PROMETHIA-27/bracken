@@ -12,21 +12,23 @@ pub mod typecheck;
 // lalrpop_mod!(pub parser);
 
 pomelo! {
+    %token #[derive(Clone, Copy, Debug)] pub enum Token {};
+
     %left Plus Minus;
     %left Mul;
 
-    file ::= fnDefs;
+    file ::= fnDefs?;
 
     fnDefs ::= fnDef;
-    fnDefs ::= fnDefs Comma fnDef;
-    fnDef ::= Function Ident LParen params RParen returnType? stmts End;
+    fnDefs ::= fnDefs fnDef;
+    fnDef ::= Function Ident LParen params? RParen returnType? stmts? End;
     params ::= param;
     params ::= params Comma param;
     param ::= Ident Colon Ident;
     returnType ::= RArrow Ident;
 
     stmts ::= expr;
-    stmts ::= stmts Semicolon expr;
+    stmts ::= stmts expr;
 
     exprs ::= expr;
     exprs ::= exprs Comma expr;
@@ -54,15 +56,67 @@ pomelo! {
     factor ::= LBrace expr RBrace;
 
     return_ ::= Return LParen expr? RParen;
-    while_ ::= While expr stmts End;
+    while_ ::= While expr stmts? End;
     break_ ::= Break;
-    fnCall ::= factor LParen exprs RParen;
+    fnCall ::= factor LParen exprs? RParen;
 }
 
-fn test() {
-    // let mut parser = Parser::new();
-    // for tok in [Token::Ident("Bruh".into())] {
-    //     parser.parse(tok).unwrap();
-    // }
-    // let data = parser.end_of_input().unwrap();
+pub fn test() {
+    use Token::*;
+    let mut parser = Parser::new();
+    for tok in [
+        Function,
+        Ident,
+        LParen,
+        RParen,
+        RArrow,
+        Ident,
+        Let,
+        Ident,
+        Equal,
+        Literal,
+        Let,
+        Ident,
+        Equal,
+        Literal,
+        While,
+        Ident,
+        Minus,
+        Literal,
+        Ident,
+        Equal,
+        Ident,
+        Plus,
+        Literal,
+        Ident,
+        Equal,
+        Ident,
+        Mul,
+        Literal,
+        End,
+        Return,
+        LParen,
+        Ident,
+        Plus,
+        Ident,
+        LParen,
+        RParen,
+        RParen,
+        End,
+        Function,
+        Ident,
+        LParen,
+        RParen,
+        RArrow,
+        Ident,
+        Return,
+        LParen,
+        Literal,
+        RParen,
+        End,
+    ] {
+        parser.parse(tok).unwrap();
+        println!("Parsed {tok:?}");
+    }
+    let data = parser.end_of_input().unwrap();
 }
