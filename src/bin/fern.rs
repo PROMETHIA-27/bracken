@@ -11,5 +11,5 @@
 // }
 
 fn main() {
-    bracken::test();
+    bracken::parser::test();
 }
