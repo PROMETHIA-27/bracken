@@ -105,10 +105,6 @@ pomelo! {
     %type atom Id<Expr>;
     %type exprs Id<Vec<Id<Expr>>>;
     %type stmts Id<Vec<Id<Expr>>>;
-    %type return_ Id<Expr>;
-    %type while_ Id<Expr>;
-    %type break_ Id<Expr>;
-    %type fn_call Id<Expr>;
     %type ident (Loc, Id<str>);
     %type literal (Loc, Id<str>);
 
