@@ -1,162 +1,177 @@
-// use std::collections::BTreeMap;
-// use std::fmt::Display;
-// use std::hash::Hash;
-// use std::ops::Range;
+use std::collections::BTreeMap;
 
-// use cranelift_entity::PrimaryMap;
-// use thiserror::Error;
+use crate::db::{ArenaStored, Db, DebugWithContext, Id, Storable};
+use crate::parser::Loc;
 
-// use crate::bytecode::FunctionId;
-// use crate::error::OneOf;
-// use crate::parser::FileParser;
-// use crate::Db;
+pub struct Spanned<T> {
+    pub loc: Loc,
+    pub value: T,
+}
 
-// #[derive(Clone, Debug, Eq, Error, PartialEq)]
-// pub enum ParseError {
-//     #[error("invalid token encountered at {0}")]
-//     InvalidToken(usize),
-//     #[error("encountered unexpected EOF")]
-//     UnrecognizedEof,
-//     #[error("{0}..{1}: unexpected token {2} encountered; expected {3}")]
-//     UnrecognizedToken(usize, usize, String, OneOf<String>),
-//     #[error("unexpected extra token encountered")]
-//     ExtraToken,
-// }
+impl<C, T: DebugWithContext<C>> DebugWithContext<C> for Spanned<T> {
+    fn fmt(&self, ctx: &C, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.value.fmt(ctx, f)
+    }
+}
 
-// pub struct SourceFile {
-//     pub text: String,
-// }
+pub struct FunctionDef {
+    pub name: Spanned<Id<str>>,
+    pub params: Spanned<Vec<Spanned<Param>>>,
+    pub return_ty: Option<Spanned<Id<str>>>,
+    pub body: Id<Vec<Id<Expr>>>,
+}
 
-// pub fn file_ast(db: &dyn Db, source: SourceFile) -> Result<File, ParseError> {
-//     let file = FileParser::new()
-//         .parse(source, db, source.text(db))
-//         .map_err(|err| match err {
-//             lalrpop_util::ParseError::InvalidToken { location } => {
-//                 ParseError::InvalidToken(location)
-//             }
-//             lalrpop_util::ParseError::UnrecognizedEof { .. } => ParseError::UnrecognizedEof,
-//             lalrpop_util::ParseError::UnrecognizedToken {
-//                 token: (l1, t, l2),
-//                 expected,
-//             } => ParseError::UnrecognizedToken(
-//                 l1,
-//                 l2,
-//                 format!("`{t}`"),
-//                 OneOf::new(expected).expect("unrecognized token with no expected tokens"),
-//             ),
-//             lalrpop_util::ParseError::ExtraToken { .. } => ParseError::ExtraToken,
-//             _ => unreachable!(),
-//         })?;
-//     Ok(file)
-// }
+impl DebugWithContext<Db> for FunctionDef {
+    fn fmt(&self, ctx: &Db, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FunctionDef")
+            .field("name", &self.name.with(ctx))
+            .field("params", &self.params.with(ctx))
+            .field("return_ty", &self.return_ty.with(ctx))
+            .field("body", &self.body.with(ctx))
+            .finish()
+    }
+}
 
-// pub struct File {
-//     pub source: SourceFile,
+pub struct Param {
+    pub name: Spanned<Id<str>>,
+    pub ty: Spanned<Id<str>>,
+}
 
-//     pub lines: Vec<usize>,
+impl DebugWithContext<Db> for Param {
+    fn fmt(&self, ctx: &Db, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FunctionDef")
+            .field("name", &self.name.with(ctx))
+            .field("ty", &self.ty.with(ctx))
+            .finish()
+    }
+}
 
-//     pub def_ids: BTreeMap<Name, FunctionId>,
+pub type Expr = Spanned<ExprInner>;
 
-//     pub defs: PrimaryMap<FunctionId, FnDef>,
-//     // TODO: RIGHT NOW: add span info so I can return good errors
-// }
+pub enum ExprInner {
+    Ident(Id<str>),
+    Literal(Id<str>),
+    Return(Option<Id<Expr>>),
+    While {
+        cond: Id<Expr>,
+        body: Id<Vec<Id<Expr>>>,
+    },
+    Break,
+    FnCall {
+        callee: Id<Expr>,
+        args: Id<Vec<Id<Expr>>>,
+    },
+    Plus {
+        lhs: Id<Expr>,
+        rhs: Id<Expr>,
+    },
+    Minus {
+        lhs: Id<Expr>,
+        rhs: Id<Expr>,
+    },
+    Mul {
+        lhs: Id<Expr>,
+        rhs: Id<Expr>,
+    },
+    VariableDecl {
+        name: Id<str>,
+        ty: Option<Id<str>>,
+        value: Id<Expr>,
+    },
+    VariableAssign {
+        name: Id<str>,
+        value: Id<Expr>,
+    },
+    Error,
+}
 
-// impl File {
-//     pub fn from_defs(db: &dyn Db, source: SourceFile, defs: Vec<FnDef>) -> Self {
-//         let lines = source
-//             .text(db)
-//             .chars()
-//             .enumerate()
-//             .filter_map(|(i, c)| (c == '\n').then_some(i))
-//             .collect();
-//         let defs: PrimaryMap<_, _> = defs.into_iter().collect();
-//         let def_ids = defs.iter().map(|(i, def)| (def.name(db), i)).collect();
+impl DebugWithContext<Db> for ExprInner {
+    fn fmt(&self, ctx: &Db, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExprInner::Ident(id) => f.debug_tuple("Ident").field(&id.with(ctx)).finish(),
+            ExprInner::Literal(id) => f.debug_tuple("Literal").field(&id.with(ctx)).finish(),
+            ExprInner::Return(id) => f.debug_tuple("Return").field(&id.with(ctx)).finish(),
+            ExprInner::While { cond, body } => f
+                .debug_struct("While")
+                .field("cond", &cond.with(ctx))
+                .field("body", &body.with(ctx))
+                .finish(),
+            ExprInner::Break => f.debug_struct("Break").finish(),
+            ExprInner::FnCall { callee, args } => f
+                .debug_struct("FnCall")
+                .field("callee", &callee.with(ctx))
+                .field("args", &args.with(ctx))
+                .finish(),
+            ExprInner::Plus { lhs, rhs } => f
+                .debug_struct("Plus")
+                .field("lhs", &lhs.with(ctx))
+                .field("rhs", &rhs.with(ctx))
+                .finish(),
+            ExprInner::Minus { lhs, rhs } => f
+                .debug_struct("Minus")
+                .field("lhs", &lhs.with(ctx))
+                .field("rhs", &rhs.with(ctx))
+                .finish(),
+            ExprInner::Mul { lhs, rhs } => f
+                .debug_struct("Mul")
+                .field("lhs", &lhs.with(ctx))
+                .field("rhs", &rhs.with(ctx))
+                .finish(),
+            ExprInner::VariableDecl { name, ty, value } => f
+                .debug_struct("VariableDecl")
+                .field("name", &name.with(ctx))
+                .field("ty", &ty.with(ctx))
+                .field("value", &value.with(ctx))
+                .finish(),
+            ExprInner::VariableAssign { name, value } => f
+                .debug_struct("VariableAssign")
+                .field("name", &name.with(ctx))
+                .field("value", &value.with(ctx))
+                .finish(),
+            ExprInner::Error => f.debug_struct("Error").finish(),
+        }
+    }
+}
 
-//         Self::new(db, source, lines, def_ids, defs)
-//     }
+impl ArenaStored for Expr {}
+impl ArenaStored for Vec<Id<Expr>> {}
+impl ArenaStored for Spanned<FunctionDef> {}
 
-//     pub fn offset_to_loc(&self, db: &dyn Db, offset: usize) -> Location {
-//         let line = match self.lines(db).binary_search(&offset) {
-//             Ok(index) | Err(index) => index - 1,
-//         };
-//         Location {
-//             line,
-//             col: offset - self.lines(db)[line],
-//         }
-//     }
+#[derive(Default)]
+pub struct StringStore {
+    lookup: BTreeMap<String, Id<str>>,
+    ids: Vec<(usize, usize)>,
+    strings: String,
+}
 
-//     pub fn def_id(&self, db: &dyn Db, def: Name) -> FunctionId {
-//         self.def_ids(db)[&def]
-//     }
-// }
+impl Storable for str {
+    type Store = StringStore;
+    type Input<'a> = &'a str;
 
-// pub struct ExprList {
-//     pub exprs: Vec<Expr>,
-// }
+    fn get(id: Id<Self>, store: &StringStore) -> &Self {
+        let (start, end) = store.ids.get(id.index()).copied().unwrap();
+        &store.strings[start..end]
+    }
 
-// #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-// pub struct Location {
-//     pub line: usize,
-//     pub col: usize,
-// }
+    fn get_mut(id: Id<Self>, store: &mut Self::Store) -> &mut Self {
+        let (start, end) = store.ids.get(id.index()).copied().unwrap();
+        &mut store.strings[start..end]
+    }
 
-// impl Display for Location {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.write_fmt(format_args!("Line {}, Column {}", self.line, self.col))
-//     }
-// }
+    fn insert(value: &str, store: &mut StringStore) -> Id<Self> {
+        if let Some(id) = store.lookup.get(value) {
+            return *id;
+        }
 
-// pub struct Name {
-//     pub text: String,
-// }
+        let start = store.strings.len();
+        let end = start + value.len();
+        store.strings.push_str(value);
 
-// pub struct FnDef {
-//     pub name: Name,
-//     pub body: Stmts,
+        let id = Id::new(store.ids.len());
+        store.ids.push((start, end));
 
-//     pub params: Vec<(Name, Name)>,
-//     pub return_type: Option<Name>,
-// }
+        store.lookup.insert(value.to_string(), id);
 
-// pub struct Stmts {
-//     pub stmts: Vec<Stmt>,
-// }
-
-// #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-// pub enum Stmt {
-//     Expr(Expr),
-// }
-
-// pub struct Expr {
-//     pub kind: ExprKind,
-//     pub span: Range<usize>,
-// }
-
-// #[derive(Clone, Debug, Eq, PartialEq)]
-// pub enum ExprKind {
-//     Let {
-//         name: Name,
-//         ty: Option<Name>,
-//         value: Expr,
-//     },
-//     Set {
-//         name: Name,
-//         value: Expr,
-//     },
-//     Name(Name),
-//     Literal(i32),
-//     Plus(Expr, Expr),
-//     Minus(Expr, Expr),
-//     Times(Expr, Expr),
-//     While {
-//         pred: Expr,
-//         body: Stmts,
-//     },
-//     Break(Option<Expr>),
-//     Return(Option<Expr>),
-//     Call {
-//         callee: Expr,
-//         params: ExprList,
-//     },
-//     // TODO: Parenthesized expr?
-// }
+        id
+    }
+}
