@@ -1,18 +1,5 @@
-use std::collections::BTreeMap;
-
-use crate::db::{ArenaStored, Db, DebugWithContext, Id, Storable};
-use crate::parser::Loc;
-
-pub struct Spanned<T> {
-    pub loc: Loc,
-    pub value: T,
-}
-
-impl<C, T: DebugWithContext<C>> DebugWithContext<C> for Spanned<T> {
-    fn fmt(&self, ctx: &C, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.value.fmt(ctx, f)
-    }
-}
+use prolangkit::db::{ArenaStored, Db, DebugWithContext, Id};
+use prolangkit::Spanned;
 
 pub struct FunctionDef {
     pub name: Spanned<Id<str>>,
@@ -47,6 +34,9 @@ impl DebugWithContext<Db> for Param {
 }
 
 pub type Expr = Spanned<ExprInner>;
+
+impl ArenaStored for ExprInner {}
+impl ArenaStored for FunctionDef {}
 
 pub enum ExprInner {
     Ident(Id<str>),
@@ -130,48 +120,5 @@ impl DebugWithContext<Db> for ExprInner {
                 .finish(),
             ExprInner::Error => f.debug_struct("Error").finish(),
         }
-    }
-}
-
-impl ArenaStored for Expr {}
-impl ArenaStored for Vec<Id<Expr>> {}
-impl ArenaStored for Spanned<FunctionDef> {}
-
-#[derive(Default)]
-pub struct StringStore {
-    lookup: BTreeMap<String, Id<str>>,
-    ids: Vec<(usize, usize)>,
-    strings: String,
-}
-
-impl Storable for str {
-    type Store = StringStore;
-    type Input<'a> = &'a str;
-
-    fn get(id: Id<Self>, store: &StringStore) -> &Self {
-        let (start, end) = store.ids.get(id.index()).copied().unwrap();
-        &store.strings[start..end]
-    }
-
-    fn get_mut(id: Id<Self>, store: &mut Self::Store) -> &mut Self {
-        let (start, end) = store.ids.get(id.index()).copied().unwrap();
-        &mut store.strings[start..end]
-    }
-
-    fn insert(value: &str, store: &mut StringStore) -> Id<Self> {
-        if let Some(id) = store.lookup.get(value) {
-            return *id;
-        }
-
-        let start = store.strings.len();
-        let end = start + value.len();
-        store.strings.push_str(value);
-
-        let id = Id::new(store.ids.len());
-        store.ids.push((start, end));
-
-        store.lookup.insert(value.to_string(), id);
-
-        id
     }
 }

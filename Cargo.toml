@@ -21,5 +21,6 @@ cranelift-jit = { version = "0.102.1" }
 cranelift-module = { version = "0.102.1" }
 logos = "0.14.2"
 pomelo = "0.1.5"
+prolangkit = "0.1.0"
 serde = { version = "1.0.193", features = ["derive"] }
 thiserror = "1.0.50"

@@ -1,42 +1,16 @@
-use crate::ast::{Spanned};
-use crate::db::{Db, DebugWithContext};
+use crate::ast::{Expr, FunctionDef};
 use logos::Logos;
 use pomelo::pomelo;
 
 pub use parser::*;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Loc {
-    start: u32,
-    end: u32,
-}
-
-impl Loc {
-    pub fn start(&self) -> usize {
-        self.start.try_into().unwrap()
-    }
-
-    pub fn end(&self) -> usize {
-        self.end.try_into().unwrap()
-    }
-
-    pub fn span(&self, other: Loc) -> Loc {
-        Loc {
-            start: self.start,
-            end: other.end,
-        }
-    }
-
-    pub fn with<T>(self, value: T) -> Spanned<T> {
-        Spanned { loc: self, value }
-    }
-}
+use prolangkit::db::{Db, DebugWithContext, Id};
+use prolangkit::Spanned;
 
 pomelo! {
     %include {
-        use crate::ast::{Expr, ExprInner, FunctionDef, Param, Spanned};
-        use crate::parser::Loc;
-        use crate::db::{Id, Db};
+        use crate::ast::{Expr, ExprInner, FunctionDef, Param};
+        use prolangkit::db::{Id, Db};
+        use prolangkit::{Loc, Spanned};
         use logos::{Logos, Lexer};
 
         fn location<'src>(lexer: &mut Lexer<'src, Token<'src>>) -> Loc {
@@ -121,7 +95,7 @@ pomelo! {
 
     // Functions
     fn_defs ::= fn_def(def) { vec![def] };
-    fn_defs ::= fn_defs(mut rest) fn_def(def) { 
+    fn_defs ::= fn_defs(mut rest) fn_def(def) {
         rest.push(def);
         rest
     };
@@ -138,15 +112,15 @@ pomelo! {
         }))
     };
     params ::= param(param) { param.loc.with(vec![param]) };
-    params ::= params(mut rest) Comma param(param) { 
-        rest.loc.end = param.loc.end; 
-        rest.value.push(param); 
-        rest 
+    params ::= params(mut rest) Comma param(param) {
+        rest.loc.end = param.loc.end;
+        rest.value.push(param);
+        rest
     };
-    param ::= ident((l, name)) Colon ident((r, ty)) { 
-        l.span(r).with(Param { 
-            name: l.with(name), 
-            ty: r.with(ty) 
+    param ::= ident((l, name)) Colon ident((r, ty)) {
+        l.span(r).with(Param {
+            name: l.with(name),
+            ty: r.with(ty)
         })
     };
     return_type ::= RArrow(l) ident((r, name)) { (l.span(r), name) };
@@ -175,7 +149,7 @@ pomelo! {
         extra.insert(l.span(r).with(ExprInner::VariableDecl { name, ty: ty.map(|ty| ty.1), value }))
     };
     type_ascription ::= Colon(l) ident((r, name)) { (l.span(r), name) };
-    expr ::= ident((l, name)) Equal expr(value) { 
+    expr ::= ident((l, name)) Equal expr(value) {
         let r = extra.get(value).loc;
         extra.insert(l.span(r).with(ExprInner::VariableAssign { name, value }))
     };
@@ -235,7 +209,15 @@ pub fn test() {
 
     let tokens = Token::lexer(text);
 
-    let mut parser = Parser::new(Db::default());
+    let mut db = Db::default()
+        .register::<str>()
+        .register::<Expr>()
+        .register::<Vec<Id<Expr>>>()
+        .register::<Spanned<FunctionDef>>();
+
+    db.insert::<Vec<Id<Expr>>>(vec![]);
+
+    let mut parser = Parser::new(db);
 
     for tok in tokens {
         println!("Lexed {:?}", tok.clone().unwrap());

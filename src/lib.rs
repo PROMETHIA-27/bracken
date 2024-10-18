@@ -1,6 +1,5 @@
 pub mod ast;
 pub mod bytecode;
-pub mod db;
 pub mod error;
 pub mod lower;
 pub mod nameres;
